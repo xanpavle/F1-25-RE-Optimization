@@ -76,6 +76,11 @@ The **quality level** (Quality / Balanced / Performance) is never changed — it
 stays whatever you picked in-game. On weaker GPUs, lower it yourself; on
 stronger GPUs, raise it.
 
+**Frame Generation is also left untouched.** It is a separate setting from
+upscaling. On NVIDIA, if auto mode picks DLSS, set Frame Generation to **DLSS**
+in-game once — mixing DLSS upscaling with FSR frame generation can make the game
+fall back or disable it.
+
 You can force a backend in `f125_tune.ini`:
 
 ```ini
