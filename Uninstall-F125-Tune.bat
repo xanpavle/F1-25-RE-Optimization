@@ -1,16 +1,16 @@
 @echo off
 setlocal
-set "GAME=C:\Program Files (x86)\Steam\steamapps\common\F1 25"
+rem Removes the mod from the game folder. Leaves your graphics settings alone.
+rem Detects the game install the same way the installer does.
+set "PS=powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-F125-Tune.ps1""
 
-del /Q "%GAME%\dinput8.dll" >nul 2>&1
-if errorlevel 1 (
-  echo Could not delete "%GAME%\dinput8.dll".
-  echo Right-click and "Run as administrator", then retry.
-  pause
-  exit /b 1
+if "%~1"=="" (
+  %PS% -Action Uninstall
+) else (
+  %PS% -Action Uninstall -Game "%~1"
 )
-del /Q "%GAME%\f125_tune.ini" >nul 2>&1
-echo Removed dinput8.dll and f125_tune.ini from:
-echo   %GAME%
-echo (f125_tune.log was left in place.)
-pause
+
+if errorlevel 1 (
+  echo.
+  pause
+)

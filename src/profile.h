@@ -5,9 +5,22 @@
 
 namespace profile {
 
+// Which anti-aliasing / upscaling backend to write into <antialiasing .../>.
+// Keep leaves the user's in-game choice untouched.
+enum class Upscaler {
+    Keep = 0,
+    Taa,
+    Dlss,
+    Fsr3,
+    Xess,
+    Off,
+};
+
 // Rewrites known attributes in `in` (NUL-terminated XML) to tuned values,
 // writing the result to `out` (cap bytes, NUL-terminated).
+// When `up` is not Keep, the <antialiasing> element is switched to that backend.
 // Returns the output length, or 0 on error.
-size_t Transform(const char* in, char* out, size_t cap);
+size_t Transform(const char* in, char* out, size_t cap,
+                 Upscaler up = Upscaler::Keep);
 
 }  // namespace profile

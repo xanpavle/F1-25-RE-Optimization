@@ -1,5 +1,7 @@
 #include "tune.h"
 #include "profile.h"
+#include "gpu.h"
+#include "version.h"
 #include <windows.h>
 #include <shlobj.h>
 #include <stdlib.h>
@@ -22,6 +24,7 @@ int       g_entry_count = 0;
 bool      g_log_all = false;
 char      g_log_prefix[64] = {0};
 bool      g_profile_apply = false;
+char      g_upscaler_mode[16] = "auto";
 
 HMODULE   g_self = nullptr;
 wchar_t   g_exe_dir[MAX_PATH] = {0};
@@ -61,6 +64,17 @@ bool ReadFileAll(const wchar_t* path, char* out, size_t cap) {
     if (!ok) return false;
     out[got] = 0;
     return true;
+}
+
+bool WriteFileAllNew(const wchar_t* path, const char* data, size_t n) {
+    // CREATE_NEW: never clobber an existing backup.
+    HANDLE h = CreateFileW(path, GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD wrote = 0;
+    BOOL ok = WriteFile(h, data, (DWORD)n, &wrote, nullptr);
+    CloseHandle(h);
+    return ok && wrote == n;
 }
 
 bool ParseFloat(const char* s, uint32_t* bits) {
@@ -129,6 +143,7 @@ void ParseIni(const char* text) {
             if (strstr(line, "log")) section = 1;
             else if (strstr(line, "override")) section = 2;
             else if (strstr(line, "profile")) section = 3;
+            else if (strstr(line, "upscaler")) section = 4;
             else section = 0;
             continue;
         }
@@ -151,6 +166,11 @@ void ParseIni(const char* text) {
             AddEntry(key, val);
         } else if (section == 3) {
             if (!_stricmp(key, "apply")) g_profile_apply = (atoi(val) != 0);
+        } else if (section == 4) {
+            if (!_stricmp(key, "mode")) {
+                strncpy(g_upscaler_mode, val, sizeof(g_upscaler_mode) - 1);
+                g_upscaler_mode[sizeof(g_upscaler_mode) - 1] = 0;
+            }
         }
     }
 }
@@ -166,6 +186,50 @@ void AppendLog(const char* line) {
         CloseHandle(h);
     }
     LeaveCriticalSection(&g_cs);
+}
+
+// Start every launch with a fresh log, so the file always describes the
+// current session instead of accumulating forever.
+void ResetLog() {
+    if (!g_log_path[0]) return;
+    HANDLE h = CreateFileW(g_log_path, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+}
+
+const char* UpName(profile::Upscaler up) {
+    switch (up) {
+        case profile::Upscaler::Taa:  return "TAA";
+        case profile::Upscaler::Dlss: return "DLSS";
+        case profile::Upscaler::Fsr3: return "FSR 3";
+        case profile::Upscaler::Xess: return "XeSS";
+        case profile::Upscaler::Off:  return "off (no AA)";
+        default:                      return "keep (unchanged)";
+    }
+}
+
+// [upscaler] mode -> concrete backend. "auto" maps vendor/series to the best
+// backend the GPU actually supports.
+profile::Upscaler ChooseUpscaler(const gpu::Info& g) {
+    const char* m = g_upscaler_mode;
+
+    if (!_stricmp(m, "keep") || !_stricmp(m, "none")) return profile::Upscaler::Keep;
+    if (!_stricmp(m, "off"))  return profile::Upscaler::Off;
+    if (!_stricmp(m, "taa"))  return profile::Upscaler::Taa;
+    if (!_stricmp(m, "dlss")) return profile::Upscaler::Dlss;
+    if (!_stricmp(m, "fsr3") || !_stricmp(m, "fsr")) return profile::Upscaler::Fsr3;
+    if (!_stricmp(m, "xess")) return profile::Upscaler::Xess;
+
+    switch (g.vendor) {
+        case gpu::VendorNvidia:
+            return g.supportsDlss ? profile::Upscaler::Dlss : profile::Upscaler::Fsr3;
+        case gpu::VendorAmd:
+            return profile::Upscaler::Fsr3;
+        case gpu::VendorIntel:
+            return g.supportsXess ? profile::Upscaler::Xess : profile::Upscaler::Fsr3;
+        default:
+            return profile::Upscaler::Keep;
+    }
 }
 
 }  // namespace
@@ -204,6 +268,8 @@ void Init() {
     ParseIni(buf);
 
     _snwprintf(g_log_path, MAX_PATH, L"%s\\f125_tune.log", exe);
+    ResetLog();
+    Note(F125_MOD_NAME " v" F125_MOD_VERSION);
 }
 
 bool LookupBool(const char* name, uint8_t* out) {
@@ -313,7 +379,52 @@ bool ApplyProfile() {
         return false;
     }
 
-    size_t n = profile::Transform(in, out, kCap);
+    // Keep exactly one untouched copy of the original settings, so
+    // Restore-F125-Tune.ps1 can put the file back. CREATE_NEW means we never
+    // overwrite the first (stock) backup on later launches.
+    {
+        wchar_t bak[MAX_PATH] = {0};
+        _snwprintf(bak, MAX_PATH, L"%s.untuned", dst);
+        if (GetFileAttributesW(bak) == INVALID_FILE_ATTRIBUTES) {
+            if (WriteFileAllNew(bak, in, strlen(in))) {
+                Note("profile: saved stock backup hardware_settings_config.xml.untuned");
+            } else {
+                Note("WARN: could not write the .untuned settings backup");
+            }
+        }
+    }
+
+    const gpu::Info g = gpu::Detect();
+    const profile::Upscaler up = ChooseUpscaler(g);
+
+    char gpuLine[224];
+    if (g.vendor != gpu::VendorUnknown) {
+        char series[32] = "";
+        if (g.series > 0) {
+            _snprintf(series, sizeof(series), " %d-series", g.series);
+        }
+        _snprintf(gpuLine, sizeof(gpuLine), "GPU: %s (%s%s)", g.name,
+                  gpu::VendorName(g.vendor), series);
+    } else {
+        _snprintf(gpuLine, sizeof(gpuLine), "GPU: not detected");
+    }
+    gpuLine[sizeof(gpuLine) - 1] = 0;
+    Note(gpuLine);
+
+    char upLine[160];
+    _snprintf(upLine, sizeof(upLine), "upscaler: mode=%s -> %s", g_upscaler_mode,
+              UpName(up));
+    upLine[sizeof(upLine) - 1] = 0;
+    Note(upLine);
+
+    if (up == profile::Upscaler::Dlss && !g.supportsDlss) {
+        Note("WARN: DLSS forced on a GPU without DLSS - the game may fall back");
+    }
+    if (up == profile::Upscaler::Keep && g.vendor == gpu::VendorUnknown) {
+        Note("upscaler: unknown GPU - leaving your in-game upscaler unchanged");
+    }
+
+    size_t n = profile::Transform(in, out, kCap, up);
     free(in);
     if (n == 0) {
         free(out);

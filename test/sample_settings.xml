@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<hardware_settings_config applyOOTB="false">
+	<antialiasing taa="false" cas="1" dlss="false" fsr3="1" xess="false" />
+	<aa_quality value="0" />
+	<shadows worldShadowMapSize="4096" nightShadowMapSize="4096" skyShadowMap32Bits="true" sampling="3" spotShadowSampling="3" crowdInShadows="true" />
+	<lighting volumetricFogMapWidth="1920" volumetricFogMapHeight="1080" />
+	<ssao algorithm="3" />
+	<ssrt quality="4" />
+	<postprocess godRays="true" lensStreak="true" motionBlurV2="true" />
+	<particles high="true" />
+	<crowd billboardDistance="6000" />
+	<ground_cover drawDistance="120.0" />
+	<hair enabled="true" />
+	<cs_culling enabled="false" />
+</hardware_settings_config>

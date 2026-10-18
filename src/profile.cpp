@@ -5,6 +5,9 @@
 //   * mirrors.*        - user asked to leave mirror resolution/cadence alone
 //   * rt_* / RayTracing - keeps the Ultra look; RT is the next dial if wanted
 //   * weather rain*    - only matters when it rains, and it is visible then
+//   * aa_quality       - the quality level stays whatever you picked in-game;
+//                        only the backend booleans in <antialiasing> are
+//                        switched, and only when [upscaler] asks for it.
 #include "profile.h"
 #include <string.h>
 
@@ -97,6 +100,28 @@ void ReplaceAttr(char* line, size_t cap, const char* attr, const char* val) {
     }
 }
 
+// Switch the <antialiasing .../> element to the requested backend.
+void ApplyUpscaler(char* line, size_t cap, Upscaler up) {
+    const char* taa  = "false";
+    const char* dlss = "false";
+    const char* fsr  = "false";
+    const char* xess = "false";
+
+    switch (up) {
+        case Upscaler::Taa:  taa  = "true"; break;
+        case Upscaler::Dlss: dlss = "true"; break;
+        case Upscaler::Fsr3: fsr  = "true"; break;
+        case Upscaler::Xess: xess = "true"; break;
+        case Upscaler::Off:  break;          // all false
+        case Upscaler::Keep: return;         // caller filtered this already
+    }
+
+    ReplaceAttr(line, cap, "taa",  taa);
+    ReplaceAttr(line, cap, "dlss", dlss);
+    ReplaceAttr(line, cap, "fsr3", fsr);
+    ReplaceAttr(line, cap, "xess", xess);
+}
+
 // Read the element name from an element-start line. Returns 0 if not one.
 size_t ElemTag(const char* line, char* tag, size_t tagCap) {
     const char* p = line;
@@ -113,7 +138,7 @@ size_t ElemTag(const char* line, char* tag, size_t tagCap) {
 
 }  // namespace
 
-size_t Transform(const char* in, char* out, size_t cap) {
+size_t Transform(const char* in, char* out, size_t cap, Upscaler up) {
     size_t o = 0;
     const char* p = in;
     while (*p) {
@@ -127,6 +152,9 @@ size_t Transform(const char* in, char* out, size_t cap) {
 
         char tag[64];
         if (ElemTag(line, tag, sizeof(tag)) > 0) {
+            if (up != Upscaler::Keep && strcmp(tag, "antialiasing") == 0) {
+                ApplyUpscaler(line, sizeof(line), up);
+            }
             for (int i = 0; i < kOvCount; ++i) {
                 if (strcmp(kOv[i].tag, tag) == 0) {
                     ReplaceAttr(line, sizeof(line), kOv[i].attr, kOv[i].val);

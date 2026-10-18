@@ -14,8 +14,10 @@ void Init();
 // Appends a free-form status line to the discovery log.
 void Note(const char* msg);
 
-// If [profile] apply=1, copies "<exe dir>\f125_tune_profile.xml" over the game's
-// hardware_settings_config.xml before the game reads it. Returns true on success.
+// If [profile] apply=1, rewrites the tuned attributes of the game's
+// hardware_settings_config.xml in place (in memory -> disk) before the engine
+// reads it, and applies the [upscaler] backend for the detected GPU.
+// Returns true on success.
 bool ApplyProfile();
 
 // True if the setting should be overridden; writes the replacement value.

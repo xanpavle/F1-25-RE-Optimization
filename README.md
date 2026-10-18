@@ -4,6 +4,8 @@ A runtime renderer optimisation for **F1 25** (EGO engine, Codemasters / EA), bu
 by reverse-engineering the shipped executable. It makes the renderer do **less work
 for the same look** — no `F1_25.exe` bytes are patched on disk.
 
+**v0.1.0** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Changelog](CHANGELOG.md)
+
 Built and tested on a single machine, offline, single-player.
 
 ![F1 25 RE-Optimization — performance comparison](docs/poster.png)
@@ -65,7 +67,7 @@ spot for this class of GPU.
 
 The mod ships a **proxy `dinput8.dll`** (F1 25 imports exactly one symbol from it,
 `DirectInput8Create`). Windows loads it at process start, *before* any game code runs.
-On load it does two things:
+On load it does three things:
 
 ### 1. Applies a tuned **delta** to your graphics settings
 
@@ -99,34 +101,67 @@ overwrites the returned value for names listed under `[override]` in `f125_tune.
 (grass/instance caps, VRS, async compute, and — if you enable it — the raytracing
 toggles, which are **immune** to the settings-file reset below).
 
+### 3. Selects the upscaler your GPU actually supports
+
+The settings file carries three boolean upscaler switches (`dlss`, `fsr3`, `xess`)
+plus `taa`. Before writing it, the mod detects the GPU and picks the right backend:
+
+| GPU | Backend chosen by `mode = auto` |
+|---|---|
+| NVIDIA RTX 20 / 30 / 40 / 50 | **DLSS** |
+| NVIDIA GTX 10 / 16 | **FSR 3** (no DLSS hardware) |
+| AMD Radeon | **FSR 3** |
+| Intel Arc | **XeSS** |
+| Intel iGPU / unknown | FSR 3 / leave the in-game choice alone |
+
+`[upscaler] mode = auto` is the default; `dlss`, `fsr3`, `xess`, `taa`, `off` and
+`keep` can be forced. The **quality level** (`aa_quality`: Quality / Balanced /
+Performance) is never changed — it stays what you picked in-game. Detection is in
+`src/gpu.cpp`, uses no extra runtime dependency, and `build\gputest.exe` prints
+exactly what the mod sees on your machine.
+
 ---
 
 ## Requirements
 
 - Windows 10/11 x64 (the proxy is a standard Win32 DLL).
+- Any DX12-capable GPU. The upscaler is selected automatically (DLSS / FSR 3 /
+  XeSS / TAA) — see *GPU support* above.
 - **F1 25** PC build from the same game version this was derived from. If the game has
   been updated, the detours will report a signature mismatch and skip (see
   *Compatibility*).
-- No runtime dependencies — the DLL links only against `KERNEL32`, `msvcrt`, `SHELL32`.
+- No runtime dependencies — the DLL links only against Windows system libraries
+  (`KERNEL32`, `msvcrt`, `SHELL32`, `ADVAPI32`).
 - To build from source: mingw-w64 GCC.
 
 ---
 
 ## Install
 
-1. Copy these next to `F1_25.exe` (the `F1 25` game folder):
-   - `dinput8.dll`
-   - `f125_tune.ini`
-2. Launch F1 25 **offline**.
-3. Check `f125_tune.log` in the same folder:
+**Quickest:** run `Install-F125-Tune.bat`. It auto-detects Steam libraries
+(including secondary drives via `libraryfolders.vdf`), Epic manifests, EA App and
+the default paths. If detection fails, pass the folder:
+`Install-F125-Tune.bat "D:\Games\F1 25"`.
+
+It copies `dinput8.dll` (from `build\` if you built it, otherwise `prebuilt\`) and
+`f125_tune.ini` next to `F1_25.exe`, and backs up an existing `dinput8.dll` as
+`dinput8.dll.bak-f125`.
+
+**Manual:** copy `prebuilt\dinput8.dll` and `f125_tune.ini` next to `F1_25.exe`.
+
+Then:
+
+1. Launch F1 25 **offline**.
+2. Check `f125_tune.log` in the same folder:
    - `[mod] hooks installed OK` and `[mod] profile applied …` → working.
+   - `[mod] GPU: …` / `[mod] upscaler: mode=auto -> …` → what it detected.
    - `[mod] WARN: … signature mismatch` → different game build (see *Compatibility*).
 
-Convenience scripts are included:
-- `Install-F125-Tune.bat` — edit the `GAME=` path, then run (as admin if the game is in
-  Program Files).
-- `Uninstall-F125-Tune.bat` — removes the mod.
-- `Restore-F125-Tune.ps1` — removes the mod **and** restores your original settings.
+Convenience scripts:
+- `Install-F125-Tune.bat` — install (auto-detect).
+- `Uninstall-F125-Tune.bat` — removes the mod, keeps your settings.
+- `Restore-F125-Tune.bat` — removes the mod **and** restores the stock settings
+  from the `.untuned` backup.
 
 ---
 
@@ -138,6 +173,9 @@ Convenience scripts are included:
   makes the engine rewrite its canonical values, which wipes the file-based delta for
   that session. Fully fixing this needs an in-memory hook (see *Roadmap*).
 - **Offline only.** Remove the DLL before playing online.
+- **Upscaler:** `[upscaler] mode = auto` picks DLSS / FSR 3 / XeSS for your GPU
+  and leaves your quality level alone. Force one with `dlss`, `fsr3`, `xess`,
+  `taa`, `off`, or change nothing with `keep`.
 - Edit `f125_tune.ini` to add/remove engine-level `[override]`s. Set
   `[profile] apply = 0` to leave your settings file alone.
 
@@ -166,18 +204,16 @@ Requires mingw-w64 GCC (e.g. `C:\msys64\mingw64\bin`, prepend it to `PATH`):
 
 ```
 gcc -O2 -shared -static -static-libgcc -o build\dinput8.dll ^
-    src\proxy.cpp src\hook.cpp src\tune.cpp src\profile.cpp ^
-    -luser32 -lkernel32 -lshell32
+    src\proxy.cpp src\hook.cpp src\tune.cpp src\profile.cpp src\gpu.cpp ^
+    -luser32 -lkernel32 -lshell32 -ladvapi32
 ```
 
 Or run `build.bat`.
 
-Self-tests:
+Self-tests (hook, ini parser, GPU probe, upscaler matrix):
 
 ```
-gcc -O2 -I src -o build\hooktest.exe    test\hooktest.cpp    src\hook.cpp    -static -static-libgcc
-gcc -O2 -I src -o build\tunetest.exe    test\tunetest.cpp    src\tune.cpp    -static -static-libgcc
-gcc -O2 -I src -o build\profiletest.exe test\profiletest.cpp src\profile.cpp -static -static-libgcc
+test.bat
 ```
 
 Layout:
@@ -186,9 +222,12 @@ Layout:
 src/proxy.cpp        proxy dinput8 + detours + DllMain
 src/hook.{h,cpp}     x64 inline-detour engine
 src/tune.{h,cpp}     ini parsing, override table, profile apply, discovery log
-src/profile.{h,cpp}  the settings-file delta (pure, unit-testable)
-test/                self-tests
-f125_tune.ini        profile switch + engine overrides
+src/profile.{h,cpp}  the settings-file delta + upscaler switch (pure, testable)
+src/gpu.{h,cpp}      vendor / series detection for `[upscaler] auto`
+src/version.h        version string (also written to the log)
+test/                self-tests + sample settings file
+test.bat             builds and runs every test
+f125_tune.ini        profile switch + upscaler + engine overrides
 ```
 
 ---
@@ -199,20 +238,27 @@ f125_tune.ini        profile switch + engine overrides
   update can change the prologues; the mod then fails safe (no patching) and needs the
   addresses re-derived.
 - The settings delta targets attribute names that are stable within a game version.
-- Hardware-independent in principle; the *tuned values* were chosen for a mid-high AMD
-  GPU (RX 7800 XT). On weaker GPUs expect different gains and consider lowering values
-  further; on stronger GPUs you may not want them lowered at all.
+- **GPU support is vendor-independent.** NVIDIA RTX gets DLSS, NVIDIA GTX and AMD get
+  FSR 3, Intel Arc gets XeSS, all chosen automatically. The *tuned values* were chosen
+  for a mid-high AMD GPU (RX 7800 XT): on weaker GPUs expect different gains and lower
+  the preset; on stronger GPUs you may not want them lowered at all.
+- `aa_quality` (Quality / Balanced / Performance) is never touched — only the backend
+  switch changes, so your quality choice survives.
 
 ---
 
 ## Roadmap / known issues
 
+- [x] GPU-aware upscaler selection — DLSS / FSR 3 / XeSS / TAA, chosen from the
+      detected GPU (`v0.1.0`).
 - [ ] Graphics menu re-applying a preset wipes the file delta for that session — fix by
       hooking `hardwareSettings::Options::apply` in memory.
 - [ ] Pattern-scan the prologues instead of hardcoding RVAs, so one DLL survives game
       updates.
 - [ ] Optional "RT-lite" override profile (RT AO / DDGI / shadows off via the engine
       knobs — menu-proof).
+- [ ] Per-GPU preset table (`safe` / `balanced` / `aggressive`) instead of the single
+      reference tuning.
 
 ---
 
@@ -220,3 +266,5 @@ f125_tune.ini        profile switch + engine overrides
 
 MIT — see [LICENSE](LICENSE). Provided "as is", without warranty; see the disclaimer
 above.
+
+Version **0.1.0** — changes in [CHANGELOG.md](CHANGELOG.md).
