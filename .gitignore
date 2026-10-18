@@ -1,0 +1,10 @@
+# build outputs / local cruft
+build/
+*.o
+*.obj
+*.exe
+*.log
+
+# OS cruft
+Thumbs.db
+desktop.ini
