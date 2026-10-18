@@ -33,6 +33,8 @@ First public, versioned release.
   download installs without mingw.
 - Uninstall / Restore detect the game the same way and restore the previous
   `dinput8.dll` from `dinput8.dll.bak-f125` if one was backed up.
+- The installer only backs up a `dinput8.dll` that is **not** ours, so upgrading
+  never turns an old mod build into the "restore" target.
 - `Restore-F125-Tune.ps1` no longer hardcodes a user path (uses `%USERPROFILE%`).
 - README: GPU support table, upscaler section, test instructions.
 

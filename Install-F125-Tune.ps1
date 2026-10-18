@@ -127,7 +127,11 @@ switch ($Action) {
         $targetIni = Join-Path $game 'f125_tune.ini'
 
         try {
-            if (Test-Path $targetDll) {
+            # Only back up a dinput8.dll that is NOT ours. Our own installs always
+            # have f125_tune.ini next to them, so an upgrade must not turn the
+            # previous mod build into a "restore" target.
+            $looksLikeOurs = Test-Path (Join-Path $game 'f125_tune.ini')
+            if ((Test-Path $targetDll) -and (-not $looksLikeOurs)) {
                 $bak = "$targetDll.bak-f125"
                 if (-not (Test-Path $bak)) {
                     Copy-Item $targetDll $bak -Force
