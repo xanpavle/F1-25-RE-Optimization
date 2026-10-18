@@ -6,6 +6,8 @@ for the same look** — no `F1_25.exe` bytes are patched on disk.
 
 Built and tested on a single machine, offline, single-player.
 
+![F1 25 RE-Optimization — performance comparison](docs/poster.png)
+
 ---
 
 ## ⚠️ Disclaimer — read this before you do anything
