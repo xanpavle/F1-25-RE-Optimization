@@ -35,7 +35,7 @@ Reference system:
 |---|---|
 | GPU | AMD Radeon RX 7800 XT (16 GB) |
 | CPU | AMD Ryzen 5 7600X |
-| RAM | 31 GB |
+| RAM | 32 GB |
 | Display | 2560×1440 @ 165 Hz, Windows 10 |
 | In-game | FSR 3 Quality, Frame Generation ON, Ray Tracing ON |
 
@@ -44,7 +44,7 @@ Test: **Time trial, Austria, dry, no other cars, one clean lap.**
 | Preset | Before (stock) | After (mod) |
 |---|---|---|
 | **Ultra High** (raster + RT) | ~40–60 FPS | **avg ~140 / low ~120 / high ~150** |
-| **Ultra Max** (path tracing) | ~60–67 FPS | ~60 FPS (path-tracing bound) |
+| **Ultra Max** (path tracing) | ~15–25 FPS | ~60 FPS (path-tracing bound) |
 
 > The *displayed* numbers include **Frame Generation**, which roughly doubles the
 > on-screen figure. The underlying rendering gain is estimated at **≈ +30–60%**, which
