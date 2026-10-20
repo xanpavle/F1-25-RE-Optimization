@@ -11,6 +11,9 @@
 namespace tune {
 namespace {
 
+// ---------------------------------------------------------------------------
+// [override] table: engine attributes replaced through the accessor hooks.
+// ---------------------------------------------------------------------------
 struct Entry {
     char     name[96];
     uint32_t u32;
@@ -21,27 +24,74 @@ const int kMaxEntries = 512;
 Entry     g_entries[kMaxEntries];
 int       g_entry_count = 0;
 
-bool      g_log_all = false;
-char      g_log_prefix[64] = {0};
-bool      g_profile_apply = false;
+const int kIndexSize = 1024;         // power of two
+int       g_index[kIndexSize];       // -1 empty, else entry index
+
+// ---------------------------------------------------------------------------
+// [enforce] table: per-attribute overrides of the in-engine enforcement table.
+// ---------------------------------------------------------------------------
+struct EnfOv {
+    char    name[96];
+    int32_t value;
+    int     disable;
+};
+const int kMaxEnfOv = 256;
+EnfOv     g_enfov[kMaxEnfOv];
+int       g_enfov_count = 0;
+
+enum EnfMode { kEnfOff = 0, kEnfCheaper, kEnfTarget };
+
+EnfMode   g_enf_mode        = kEnfTarget;
+bool      g_enforce_enabled = true;
+bool      g_enforce_bools   = true;
+bool      g_log_all         = false;
+bool      g_log_report      = false;
+char      g_log_prefix[64]  = {0};
+bool      g_profile_apply   = false;
+bool      g_want_guard      = true;
 char      g_upscaler_mode[16] = "auto";
 
 HMODULE   g_self = nullptr;
 wchar_t   g_exe_dir[MAX_PATH] = {0};
+wchar_t   g_ini_path[MAX_PATH] = {0};
 CRITICAL_SECTION g_cs;
 bool      g_cs_ready = false;
 
-// (node, name) pairs we have seen, with the last value written to the log.
+// (node, name) pairs seen, with the last value written to the log. Indexed with
+// a simple open-addressed hash so discovery mode is not quadratic.
 struct Seen {
     const void* node;
     char        name[96];
     uint32_t    last;
+    int         used;
+    int         next;     // chain within the bucket
 };
 const int kMaxSeen = 16384;
 Seen      g_seen[kMaxSeen];
 int       g_seen_count = 0;
+const int kSeenBuckets = 4096;
+int       g_seen_head[kSeenBuckets];
 
 wchar_t   g_log_path[MAX_PATH] = {0};
+HANDLE    g_log = INVALID_HANDLE_VALUE;
+
+uint32_t HashStr(const char* s) {
+    uint32_t h = 2166136261u;
+    while (*s) {
+        h ^= (uint8_t)*s++;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+uint32_t HashSeen(const void* node, const char* name) {
+    uint32_t h = (uint32_t)((uintptr_t)node >> 4) ^ 2166136261u;
+    while (*name) {
+        h ^= (uint8_t)*name++;
+        h *= 16777619u;
+    }
+    return h;
+}
 
 void Trim(char* s) {
     char* p = s;
@@ -52,6 +102,28 @@ void Trim(char* s) {
                      s[n - 1] == '\n')) {
         s[--n] = 0;
     }
+}
+
+// Cuts an inline `; comment` / `# comment`. Our values never contain them.
+void StripComment(char* s) {
+    for (char* p = s; *p; ++p) {
+        if (*p == ';' || *p == '#') { *p = 0; break; }
+    }
+    Trim(s);
+}
+
+bool ParseBoolStr(const char* s, bool* out) {
+    if (!_stricmp(s, "1") || !_stricmp(s, "true") || !_stricmp(s, "on") ||
+        !_stricmp(s, "yes")) {
+        *out = true;
+        return true;
+    }
+    if (!_stricmp(s, "0") || !_stricmp(s, "false") || !_stricmp(s, "off") ||
+        !_stricmp(s, "no")) {
+        *out = false;
+        return true;
+    }
+    return false;
 }
 
 bool ReadFileAll(const wchar_t* path, char* out, size_t cap) {
@@ -73,8 +145,32 @@ bool WriteFileAllNew(const wchar_t* path, const char* data, size_t n) {
     if (h == INVALID_HANDLE_VALUE) return false;
     DWORD wrote = 0;
     BOOL ok = WriteFile(h, data, (DWORD)n, &wrote, nullptr);
+    if (ok) FlushFileBuffers(h);
     CloseHandle(h);
     return ok && wrote == n;
+}
+
+// Writes to a sibling .tmp and atomically replaces the target, so a crash or a
+// racing writer can never leave a truncated settings file behind.
+bool WriteFileAtomic(const wchar_t* path, const char* data, size_t n) {
+    wchar_t tmp[MAX_PATH] = {0};
+    _snwprintf(tmp, MAX_PATH, L"%s.tmp", path);
+    HANDLE h = CreateFileW(tmp, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD wrote = 0;
+    BOOL ok = WriteFile(h, data, (DWORD)n, &wrote, nullptr);
+    if (ok) FlushFileBuffers(h);
+    CloseHandle(h);
+    if (!ok || wrote != n) {
+        DeleteFileW(tmp);
+        return false;
+    }
+    if (!MoveFileExW(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(tmp);
+        return false;
+    }
+    return true;
 }
 
 bool ParseFloat(const char* s, uint32_t* bits) {
@@ -93,42 +189,91 @@ bool ParseInt(const char* s, uint32_t* out) {
     return true;
 }
 
-void AddEntry(const char* name, const char* value) {
-    if (g_entry_count >= kMaxEntries) return;
-    Entry& e = g_entries[g_entry_count];
-    strncpy(e.name, name, sizeof(e.name) - 1);
-    e.name[sizeof(e.name) - 1] = 0;
+// Decides whether a value string is a float. A hex literal (0x1e) must not be
+// mistaken for one just because it contains an 'e'.
+bool LooksFloat(const char* v) {
+    if (v[0] == '0' && (v[1] == 'x' || v[1] == 'X')) return false;
+    return strchr(v, '.') != nullptr || strchr(v, 'e') != nullptr ||
+           strchr(v, 'E') != nullptr;
+}
 
+bool ParseValue(const char* value, uint32_t* out, int* is_float) {
     char v[64];
     strncpy(v, value, sizeof(v) - 1);
     v[sizeof(v) - 1] = 0;
     Trim(v);
-
-    if (!_stricmp(v, "true") || !_stricmp(v, "on") || !_stricmp(v, "yes")) {
-        e.u32 = 1; e.is_float = 0;
-    } else if (!_stricmp(v, "false") || !_stricmp(v, "off") || !_stricmp(v, "no")) {
-        e.u32 = 0; e.is_float = 0;
-    } else if (strchr(v, '.') || strchr(v, 'e') || strchr(v, 'E')) {
-        if (!ParseFloat(v, &e.u32)) return;
-        e.is_float = 1;
-    } else {
-        if (!ParseInt(v, &e.u32)) return;
-        e.is_float = 0;
+    {
+        bool b = false;
+        if (ParseBoolStr(v, &b)) {
+            *out = b ? 1u : 0u;
+            *is_float = 0;
+            return true;
+        }
     }
-    ++g_entry_count;
+    if (LooksFloat(v)) {
+        if (!ParseFloat(v, out)) return false;
+        *is_float = 1;
+        return true;
+    }
+    if (!ParseInt(v, out)) return false;
+    *is_float = 0;
+    return true;
+}
+
+void AddEntry(const char* name, const char* value) {
+    if (g_entry_count >= kMaxEntries) return;
+    Entry e;
+    strncpy(e.name, name, sizeof(e.name) - 1);
+    e.name[sizeof(e.name) - 1] = 0;
+    if (!ParseValue(value, &e.u32, &e.is_float)) return;
+    g_entries[g_entry_count++] = e;
+}
+
+void AddEnfOv(const char* name, const char* value) {
+    if (g_enfov_count >= kMaxEnfOv) return;
+    EnfOv e;
+    strncpy(e.name, name, sizeof(e.name) - 1);
+    e.name[sizeof(e.name) - 1] = 0;
+    e.disable = 0;
+    e.value = 0;
+    if (!_stricmp(value, "off") || !_stricmp(value, "disable") ||
+        !_stricmp(value, "disabled") || !_stricmp(value, "none") ||
+        !_stricmp(value, "default") || !strcmp(value, "-")) {
+        e.disable = 1;
+        g_enfov[g_enfov_count++] = e;
+        return;
+    }
+    uint32_t raw = 0;
+    int is_float = 0;
+    if (!ParseValue(value, &raw, &is_float)) return;
+    e.value = (int32_t)raw;
+    g_enfov[g_enfov_count++] = e;
+}
+
+void BuildIndex() {
+    for (int i = 0; i < kIndexSize; ++i) g_index[i] = -1;
+    for (int i = 0; i < g_entry_count; ++i) {
+        uint32_t h = HashStr(g_entries[i].name) & (kIndexSize - 1);
+        while (g_index[h] != -1) h = (h + 1) & (kIndexSize - 1);
+        g_index[h] = i;
+    }
 }
 
 const Entry* Find(const char* name) {
-    if (!name) return nullptr;
-    for (int i = 0; i < g_entry_count; ++i) {
-        if (strcmp(g_entries[i].name, name) == 0) return &g_entries[i];
+    if (!name || g_entry_count == 0) return nullptr;
+    uint32_t h = HashStr(name) & (kIndexSize - 1);
+    while (g_index[h] != -1) {
+        const Entry& e = g_entries[g_index[h]];
+        if (strcmp(e.name, name) == 0) return &e;
+        h = (h + 1) & (kIndexSize - 1);
     }
     return nullptr;
 }
 
 void ParseIni(const char* text) {
-    int   section = 0;  // 0 none, 1 log, 2 override
-    char  line[256];
+    enum { kNone = 0, kLog, kOverride, kProfile, kUpscaler, kEnforce };
+    int section = kNone;
+    char line[512];
     const char* p = text;
 
     while (*p) {
@@ -140,11 +285,12 @@ void ParseIni(const char* text) {
         if (line[0] == 0 || line[0] == '#' || line[0] == ';') continue;
 
         if (line[0] == '[') {
-            if (strstr(line, "log")) section = 1;
-            else if (strstr(line, "override")) section = 2;
-            else if (strstr(line, "profile")) section = 3;
-            else if (strstr(line, "upscaler")) section = 4;
-            else section = 0;
+            if (strstr(line, "log")) section = kLog;
+            else if (strstr(line, "override")) section = kOverride;
+            else if (strstr(line, "profile")) section = kProfile;
+            else if (strstr(line, "upscaler")) section = kUpscaler;
+            else if (strstr(line, "enforce")) section = kEnforce;
+            else section = kNone;
             continue;
         }
 
@@ -154,47 +300,88 @@ void ParseIni(const char* text) {
         char* key = line;
         char* val = eq + 1;
         Trim(key);
-        Trim(val);
+        StripComment(val);
 
-        if (section == 1) {
-            if (!_stricmp(key, "all")) g_log_all = (atoi(val) != 0);
-            else if (!_stricmp(key, "prefix")) {
+        if (section == kLog) {
+            if (!_stricmp(key, "all")) {
+                bool b = false;
+                if (ParseBoolStr(val, &b)) g_log_all = b; else g_log_all = atoi(val) != 0;
+            } else if (!_stricmp(key, "report")) {
+                bool b = false;
+                if (ParseBoolStr(val, &b)) g_log_report = b; else g_log_report = atoi(val) != 0;
+            } else if (!_stricmp(key, "prefix")) {
                 strncpy(g_log_prefix, val, sizeof(g_log_prefix) - 1);
                 g_log_prefix[sizeof(g_log_prefix) - 1] = 0;
             }
-        } else if (section == 2) {
+        } else if (section == kOverride) {
             AddEntry(key, val);
-        } else if (section == 3) {
-            if (!_stricmp(key, "apply")) g_profile_apply = (atoi(val) != 0);
-        } else if (section == 4) {
+        } else if (section == kProfile) {
+            bool b = false;
+            if (!_stricmp(key, "apply")) {
+                if (ParseBoolStr(val, &b)) g_profile_apply = b; else g_profile_apply = atoi(val) != 0;
+            } else if (!_stricmp(key, "enforce")) {
+                if (ParseBoolStr(val, &b)) g_enforce_enabled = b; else g_enforce_enabled = atoi(val) != 0;
+            } else if (!_stricmp(key, "guard")) {
+                if (ParseBoolStr(val, &b)) g_want_guard = b; else g_want_guard = atoi(val) != 0;
+            } else if (!_stricmp(key, "enforce_mode")) {
+                if (!_stricmp(val, "off") || !_stricmp(val, "none")) g_enf_mode = kEnfOff;
+                else if (!_stricmp(val, "cheaper")) g_enf_mode = kEnfCheaper;
+                else g_enf_mode = kEnfTarget;
+            }
+        } else if (section == kUpscaler) {
             if (!_stricmp(key, "mode")) {
                 strncpy(g_upscaler_mode, val, sizeof(g_upscaler_mode) - 1);
                 g_upscaler_mode[sizeof(g_upscaler_mode) - 1] = 0;
             }
+        } else if (section == kEnforce) {
+            if (!_stricmp(key, "bools")) {
+                bool b = false;
+                if (ParseBoolStr(val, &b)) g_enforce_bools = b; else g_enforce_bools = atoi(val) != 0;
+            } else if (!_stricmp(key, "enabled")) {
+                if (!_stricmp(val, "off")) g_enforce_enabled = false;
+                else {
+                    bool b = false;
+                    if (ParseBoolStr(val, &b)) g_enforce_enabled = b; else g_enforce_enabled = atoi(val) != 0;
+                }
+            } else {
+                AddEnfOv(key, val);
+            }
         }
+    }
+}
+
+void CloseLog() {
+    if (g_log != INVALID_HANDLE_VALUE) {
+        CloseHandle(g_log);
+        g_log = INVALID_HANDLE_VALUE;
     }
 }
 
 void AppendLog(const char* line) {
     if (!g_log_path[0]) return;
     EnterCriticalSection(&g_cs);
-    HANDLE h = CreateFileW(g_log_path, FILE_APPEND_DATA, FILE_SHARE_READ, nullptr,
-                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h != INVALID_HANDLE_VALUE) {
+    if (g_log == INVALID_HANDLE_VALUE) {
+        g_log = CreateFileW(g_log_path, FILE_APPEND_DATA,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+                            FILE_ATTRIBUTE_NORMAL, nullptr);
+    }
+    if (g_log != INVALID_HANDLE_VALUE) {
         DWORD wrote = 0;
-        WriteFile(h, line, (DWORD)strlen(line), &wrote, nullptr);
-        CloseHandle(h);
+        WriteFile(g_log, line, (DWORD)strlen(line), &wrote, nullptr);
     }
     LeaveCriticalSection(&g_cs);
 }
 
-// Start every launch with a fresh log, so the file always describes the
-// current session instead of accumulating forever.
+// Start every launch with a fresh log, so the file always describes the current
+// session instead of accumulating forever.
 void ResetLog() {
     if (!g_log_path[0]) return;
+    EnterCriticalSection(&g_cs);
+    CloseLog();
     HANDLE h = CreateFileW(g_log_path, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+    LeaveCriticalSection(&g_cs);
 }
 
 const char* UpName(profile::Upscaler up) {
@@ -208,8 +395,6 @@ const char* UpName(profile::Upscaler up) {
     }
 }
 
-// [upscaler] mode -> concrete backend. "auto" maps vendor/series to the best
-// backend the GPU actually supports.
 profile::Upscaler ChooseUpscaler(const gpu::Info& g) {
     const char* m = g_upscaler_mode;
 
@@ -232,6 +417,27 @@ profile::Upscaler ChooseUpscaler(const gpu::Info& g) {
     }
 }
 
+void SessionInfo() {
+    wchar_t exe[MAX_PATH] = {0};
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    HANDLE h = CreateFileW(exe, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                           nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h != INVALID_HANDLE_VALUE) {
+        LARGE_INTEGER sz = {};
+        GetFileSizeEx(h, &sz);
+        CloseHandle(h);
+        char line[320];
+        _snprintf(line, sizeof(line), "session: exe=%ls (%lld bytes)",
+                  exe, (long long)sz.QuadPart);
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+    }
+    char line[320];
+    _snprintf(line, sizeof(line), "session: ini=%ls", g_ini_path);
+    line[sizeof(line) - 1] = 0;
+    Note(line);
+}
+
 }  // namespace
 
 void Init() {
@@ -239,6 +445,8 @@ void Init() {
         InitializeCriticalSection(&g_cs);
         g_cs_ready = true;
     }
+    for (int i = 0; i < kIndexSize; ++i) g_index[i] = -1;
+    for (int i = 0; i < kSeenBuckets; ++i) g_seen_head[i] = -1;
 
     wchar_t exe[MAX_PATH] = {0};
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
@@ -252,24 +460,27 @@ void Init() {
 
     char buf[65536] = {0};
     if (!ReadFileAll(ini, buf, sizeof(buf))) {
-        // Fall back to the DLL's own directory.
         wchar_t dll[MAX_PATH] = {0};
         if (g_self) GetModuleFileNameW(g_self, dll, MAX_PATH);
         wchar_t* ds = wcsrchr(dll, L'\\');
         if (ds) *ds = 0;
         _snwprintf(ini, MAX_PATH, L"%s\\f125_tune.ini", dll);
         if (!ReadFileAll(ini, buf, sizeof(buf))) {
-            // No ini: run with an empty override table, no logging.
             g_log_all = false;
             return;
         }
     }
 
+    wcsncpy(g_ini_path, ini, MAX_PATH - 1);
+    g_ini_path[MAX_PATH - 1] = 0;
+
     ParseIni(buf);
+    BuildIndex();
 
     _snwprintf(g_log_path, MAX_PATH, L"%s\\f125_tune.log", exe);
     ResetLog();
     Note(F125_MOD_NAME " v" F125_MOD_VERSION);
+    SessionInfo();
 }
 
 bool LookupBool(const char* name, uint8_t* out) {
@@ -301,17 +512,22 @@ void LogRead(const void* node, const char* name, uint32_t raw, int is_bool) {
 
     int changed = 0;
     EnterCriticalSection(&g_cs);
-    int i = 0;
-    for (; i < g_seen_count; ++i) {
+    const uint32_t bucket = HashSeen(node, name) & (kSeenBuckets - 1);
+    int i = g_seen_head[bucket];
+    while (i != -1) {
         if (g_seen[i].node == node && strcmp(g_seen[i].name, name) == 0) break;
+        i = g_seen[i].next;
     }
-    if (i == g_seen_count) {
+    if (i == -1) {
         if (g_seen_count < kMaxSeen) {
+            i = g_seen_count++;
             g_seen[i].node = node;
             strncpy(g_seen[i].name, name, sizeof(g_seen[i].name) - 1);
             g_seen[i].name[sizeof(g_seen[i].name) - 1] = 0;
             g_seen[i].last = raw;
-            ++g_seen_count;
+            g_seen[i].used = 1;
+            g_seen[i].next = g_seen_head[bucket];
+            g_seen_head[bucket] = i;
             changed = 1;
         }
     } else if (g_seen[i].last != raw) {
@@ -333,12 +549,34 @@ void LogRead(const void* node, const char* name, uint32_t raw, int is_bool) {
     AppendLog(line);
 }
 
+bool WantEnforce() { return g_enforce_enabled && g_enf_mode != kEnfOff; }
+bool WantGuard()   { return g_want_guard && g_enf_mode != kEnfOff; }
+bool EnforceTarget() { return g_enf_mode != kEnfCheaper; }
+bool WantEnforceBools() { return g_enforce_bools; }
+bool LogAll()      { return g_log_all; }
+bool LogReport()   { return g_log_report; }
+
+bool LookupEnforce(const char* name, int* value, int* disable) {
+    if (!name) return false;
+    for (int i = 0; i < g_enfov_count; ++i) {
+        if (strcmp(g_enfov[i].name, name) == 0) {
+            if (value) *value = g_enfov[i].value;
+            if (disable) *disable = g_enfov[i].disable;
+            return true;
+        }
+    }
+    return false;
+}
+
+const wchar_t* ExeDir() { return g_exe_dir; }
+const wchar_t* IniPath() { return g_ini_path; }
+
 // Called from DllMain so the DLL-directory fallback works.
 void SetSelf(void* m) { g_self = (HMODULE)m; }
 
 void Note(const char* msg) {
     if (!msg) return;
-    char line[256];
+    char line[320];
     _snprintf(line, sizeof(line), "[mod] %s\n", msg);
     line[sizeof(line) - 1] = 0;
     AppendLog(line);
@@ -432,21 +670,12 @@ bool ApplyProfile() {
         return false;
     }
 
-    HANDLE h = CreateFileW(dst, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-                           FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) {
+    if (!WriteFileAtomic(dst, out, n)) {
         free(out);
-        Note("profile: write open failed");
-        return false;
-    }
-    DWORD wrote = 0;
-    BOOL ok = WriteFile(h, out, (DWORD)n, &wrote, nullptr);
-    CloseHandle(h);
-    free(out);
-    if (!ok || wrote != n) {
         Note("profile: write failed");
         return false;
     }
+    free(out);
 
     Note("profile applied (tuned delta on hardware_settings_config.xml)");
     return true;

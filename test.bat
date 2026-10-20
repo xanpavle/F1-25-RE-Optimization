@@ -3,6 +3,8 @@ setlocal
 rem Build and run every self-test. No game install or admin rights required.
 set "GCC=C:\msys64\mingw64\bin\gcc.exe"
 if not exist "%GCC%" set "GCC=gcc"
+rem gcc needs its own runtime DLLs on PATH.
+if exist "C:\msys64\mingw64\bin" set "PATH=C:\msys64\mingw64\bin;%PATH%"
 set "SRC=%~dp0src"
 set "TST=%~dp0test"
 set "OUT=%~dp0build"
@@ -11,8 +13,10 @@ if not exist "%OUT%" mkdir "%OUT%"
 echo == building tests ==
 "%GCC%" -O2 -I "%SRC%" -o "%OUT%\hooktest.exe" "%TST%\hooktest.cpp" "%SRC%\hook.cpp" -static -static-libgcc || goto :fail
 "%GCC%" -O2 -I "%SRC%" -o "%OUT%\tunetest.exe" "%TST%\tunetest.cpp" "%SRC%\tune.cpp" "%SRC%\profile.cpp" "%SRC%\gpu.cpp" -static -static-libgcc -luser32 -lshell32 -ladvapi32 || goto :fail
+"%GCC%" -O2 -I "%SRC%" -o "%OUT%\enforcetest.exe" "%TST%\enforcetest.cpp" "%SRC%\enforce.cpp" "%SRC%\hook.cpp" "%SRC%\scan.cpp" "%SRC%\tune.cpp" "%SRC%\profile.cpp" "%SRC%\gpu.cpp" -static -static-libgcc -luser32 -lshell32 -ladvapi32 || goto :fail
 "%GCC%" -O2 -I "%SRC%" -o "%OUT%\profiletest.exe" "%TST%\profiletest.cpp" "%SRC%\profile.cpp" -static -static-libgcc || goto :fail
 "%GCC%" -O2 -I "%SRC%" -o "%OUT%\gputest.exe" "%TST%\gputest.cpp" "%SRC%\gpu.cpp" -static -static-libgcc -luser32 -ladvapi32 || goto :fail
+"%GCC%" -O2 -I "%SRC%" -o "%OUT%\scantest.exe" "%TST%\scantest.cpp" "%SRC%\scan.cpp" -static -static-libgcc -luser32 || goto :fail
 
 copy /Y "%~dp0f125_tune.ini" "%OUT%\f125_tune.ini" >nul
 
@@ -27,6 +31,12 @@ echo == tunetest ==
 echo.
 echo == gputest ==
 "%OUT%\gputest.exe"
+echo.
+echo == enforcetest ==
+"%OUT%\enforcetest.exe" || goto :fail
+echo.
+echo == scantest (signature scanner; SKIP without the game) ==
+"%OUT%\scantest.exe" || goto :fail
 echo.
 echo == profiletest: upscaler matrix ==
 for %%M in (keep dlss fsr3 xess taa off) do (

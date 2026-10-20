@@ -114,13 +114,19 @@ switch ($Action) {
 
     'Install' {
         $root = $PSScriptRoot
-        $dll = Join-Path $root 'prebuilt\dinput8.dll'
-        if (Test-Path (Join-Path $root 'build\dinput8.dll')) {
-            $dll = Join-Path $root 'build\dinput8.dll'   # developer build wins
+        # Search order: next to this script (release ZIP layout), then the
+        # developer build, then the prebuilt copy that lives in the repo.
+        $dll = $null
+        foreach ($cand in @(
+            (Join-Path $root 'dinput8.dll'),
+            (Join-Path $root 'build\dinput8.dll'),      # developer build wins
+            (Join-Path $root 'prebuilt\dinput8.dll')
+        )) {
+            if (Test-Path $cand) { $dll = $cand; break }
         }
         $ini = Join-Path $root 'f125_tune.ini'
 
-        if (-not (Test-Path $dll)) { throw "dinput8.dll not found (looked in build\ and prebuilt\)." }
+        if (-not $dll) { throw "dinput8.dll not found (looked next to the script, in build\ and prebuilt\)." }
         if (-not (Test-Path $ini)) { throw 'f125_tune.ini not found next to this script.' }
 
         $targetDll = Join-Path $game 'dinput8.dll'
@@ -160,7 +166,7 @@ switch ($Action) {
         Write-Host 'Next:'
         Write-Host '  1) Launch F1 25 offline (single-player).'
         Write-Host "  2) Open $game\f125_tune.log - it should contain"
-        Write-Host '       [mod] F1 25 RE-Optimization v0.1.0'
+        Write-Host '       [mod] F1 25 RE-Optimization v0.2.0'
         Write-Host '       [mod] hooks installed OK'
         Write-Host '       [mod] GPU: ...'
         Write-Host '       [mod] upscaler: mode=auto -> ...'

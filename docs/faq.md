@@ -8,7 +8,7 @@ Short answers first, details below.
 | Can I play online with it? | **No.** Offline / single-player only. |
 | Does it work on my GPU? | Yes, on any DX12 GPU — it picks DLSS / FSR 3 / XeSS / TAA for you. |
 | Do I lose visual quality? | The expensive-but-soft parts are reduced (fog resolution, shadow map size, god rays). Preset and resolution stay yours. |
-| Why 140 FPS and not 300? | The on-screen number includes Frame Generation; the real render gain is ~30–60%. |
+| Why is my FPS not higher? | It is a quality-for-FPS trade; the ceiling is your preset/CPU. See below. |
 | Does it survive a game update? | Not automatically yet — the hooks fail safe and need new addresses. |
 | How do I know it worked? | `f125_tune.log` says `hooks installed OK` and `profile applied`. |
 | How do I remove it? | Run `Uninstall-F125-Tune.bat`, or `Restore-F125-Tune.bat` to also reset settings. |
@@ -90,15 +90,19 @@ mode = auto   ; or dlss | fsr3 | xess | taa | off | keep
 
 Run `build\gputest.exe` to see exactly what the mod detects on your machine.
 
-## Why do I get ~140 FPS and not 300?
+## Why is my FPS not higher?
 
-Two things:
+The mod is a *quality-for-FPS trade*, not a magic multiplier:
 
-1. **The displayed number includes Frame Generation**, which roughly doubles the
-   on-screen figure. The underlying render gain from this mod is about **+30–60%**.
-2. **The rest of the frame is not free.** In a race with 20 cars, the CPU, the
-   simulation and the 165 Hz cap all matter. If you are CPU-bound, no renderer
-   tweak will push you past that.
+1. **The engine's preset is the ceiling unless you use `target` mode.** With
+   `[profile] enforce_mode = target` (the default) the tuned values are substituted
+   in-engine, so they apply even if the game is stuck on a lower preset. With
+   `cheaper` the mod only ever removes work.
+2. **The displayed number includes Frame Generation**, which roughly doubles the
+   on-screen figure.
+3. **The rest of the frame is not free.** In a race with 20 cars the CPU, simulation
+   and your refresh-rate cap all matter. If you are CPU-bound, no renderer tweak
+   will push you past that.
 
 The Ultra Max / path-tracing preset is a separate story: it is officially rated
 for an RTX 30-series or RX 7900 and above, so on an RX 7800 XT it is
@@ -118,44 +122,61 @@ The delta targets things that are expensive but visually soft:
 Your resolution, preset, mirrors, ray tracing and rain are left alone. If you
 want the old look back, set `[profile] apply = 0` or run
 `Restore-F125-Tune.bat`.
-
 ## The game updated — does it still work?
 
-The two in-memory hooks are tied to the exact `F1_25.exe` build they were
-derived from. After a game update:
+From **v0.2.0** the mod re-derives its addresses at launch instead of trusting the
+hard-coded ones:
 
-- the mod verifies both function prologues **byte-for-byte** before patching;
-- on a mismatch it logs `signature mismatch`, patches nothing, and the game runs
-  normally;
-- the settings-file delta still applies (it uses attribute names, not addresses).
+- the parsers, `apply` / `applyNode` and the getters are found by **byte signature**;
+- the parser candidates are disambiguated by **name resolution** (the known attributes
+  must actually resolve into calls through them);
+- every enforcement site is **validated** against the resolved parser and, if it moved,
+  **re-derived by attribute name**;
+- anything that cannot be resolved unambiguously is **skipped and logged**
+  (`enforce: WARN <name> unresolved`), never guessed — so on a badly changed build the
+  mod still fails safe and the game runs normally;
+- the settings-file delta always applies (it uses attribute names, not addresses).
 
-Pattern-scanning the prologues is on the roadmap, which would make one DLL
-survive updates.
+If the log shows `int parser not found` the change was too large for the scanner; open
+an issue with `f125_tune.log` and the exe size/timestamp from the `session:` lines.
 
 ## Did it actually work?
 
-Open `f125_tune.log` in the game folder. A healthy launch looks like:
+Open `f125_tune.log` in the game folder. A healthy v0.2.0 launch looks like:
 
 ```
-[mod] F1 25 RE-Optimization v0.1.0
-[mod] profile: saved stock backup hardware_settings_config.xml.untuned   (first run only)
+[mod] F1 25 RE-Optimization v0.2.0
+[mod] session: exe=...\F1_25.exe (408063872 bytes)
 [mod] GPU: AMD Radeon RX 7800 XT (AMD 7000-series)
 [mod] upscaler: mode=auto -> FSR 3
 [mod] profile applied (tuned delta on hardware_settings_config.xml)
+[mod] enforce: int parser at the known RVA (table build)
+[mod] enforce: settings parser hooked (tuned values applied in-engine)
+[mod] enforce: 17 bool attributes pinned to the tuned profile (0 disabled, 0 unavailable)
+[mod] guard: preset hooks installed (delta auto-restored after menu changes)
 [mod] hooks installed OK
+[mod] enforce: worldShadowMapSize -> 2048 (preset gave 1024, mode=target)
+[mod] enforce: volumetricFogMapWidth -> 512 (preset gave 256, mode=target)
+...
 ```
+
+The `enforce:` lines are the proof: they show the preset's value and the tuned value
+that replaced it. On a game update you may instead see
+`enforce: int parser re-derived by signature (score 12/12, 11 candidates)` and
+`report: int sites table=… discovered=… missing=…`, which means the scanner took over.
+Set `[log] all = 1` to also dump every settings-parser call site, or
+`[log] report = 1` for the per-run resolution report.
 
 Anything else — see [troubleshooting](troubleshooting.md).
 
-## I opened the graphics menu and the mod stopped working
+## I opened the graphics menu — did it revert?
 
-Applying a preset in the graphics menu makes the engine rewrite its canonical
-values, which wipes the file-based delta **for that session**. The mod does not
-fight it; it re-applies on the next launch. The engine-level `[override]` values
-(VRS, instance caps, and ray-tracing toggles if enabled) are immune because they
-are hooked in memory.
-
-A permanent fix (hooking the in-memory `apply` function) is on the roadmap.
+From v0.2.0, no: the tuned values are substituted **inside the running engine** at the
+settings-parser call sites, and the boolean attributes are pinned in code. The engine
+still rewrites `hardware_settings_config.xml` with its own preset values, so the *file*
+may look stock — that is expected, the file is an engine export, not the input the mod
+relies on. The `apply` / `applyNode` hooks also restore the tuned delta to the file after
+the menu closes.
 
 ## Can I use it with other mods?
 

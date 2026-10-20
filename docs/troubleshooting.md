@@ -10,11 +10,17 @@ It is **rewritten on every launch**, so it always describes the current session.
 A healthy launch is short and looks like this:
 
 ```
-[mod] F1 25 RE-Optimization v0.1.0
+[mod] F1 25 RE-Optimization v0.2.0
+[mod] session: exe=...\F1_25.exe (408063872 bytes)
+[mod] session: ini=...\f125_tune.ini
 [mod] profile: saved stock backup hardware_settings_config.xml.untuned
 [mod] GPU: AMD Radeon RX 7800 XT (AMD 7000-series)
 [mod] upscaler: mode=auto -> FSR 3
 [mod] profile applied (tuned delta on hardware_settings_config.xml)
+[mod] enforce: int parser at the known RVA (table build)
+[mod] enforce: settings parser hooked (tuned values applied in-engine)
+[mod] enforce: 17 bool attributes pinned to the tuned profile (0 disabled, 0 unavailable)
+[mod] guard: preset hooks installed (delta auto-restored after menu changes)
 [mod] hooks installed OK
 ```
 
@@ -26,8 +32,14 @@ Find your line below.
 
 | Line | Meaning | What to do |
 |---|---|---|
-| `[mod] F1 25 RE-Optimization v0.1.0` | The DLL loaded with the game. | Good — the proxy is working. |
+| `[mod] F1 25 RE-Optimization v0.2.0` | The DLL loaded with the game. | Good — the proxy is working. |
+| `[mod] session: exe=… / ini=…` | Which executable and ini the mod actually loaded. | Check both paths if you have several game copies. |
 | `[mod] hooks installed OK` | Both engine accessors were verified and patched. | Good. |
+| `[mod] enforce: int parser at the known RVA (table build)` | Same game build as the mod was derived from; the fast path was used. | Good. |
+| `[mod] enforce: int parser re-derived by signature (score N/12, …)` | A different game build; the scanner relocated the parser and sites. | Good — send the log if anything looks off. |
+| `[mod] enforce: WARN <name> unresolved (N candidate sites) - skipped` | The scanner could not uniquely re-derive that site after an update. | Harmless — that one value is left to the preset. |
+| `[mod] enforce: int parser not found (game build unsupported)` | The change was too large for the scanner. | The file delta still applies; open an issue with the log. |
+| `[mod] enforce: [enforce] overrides applied (N set, M disabled)` | Your `[enforce]` section changed the table. | Good — remove entries if unintended. |
 | `[mod] profile applied (tuned delta on hardware_settings_config.xml)` | The settings file was rewritten. | Good. |
 | `[mod] GPU: ...` | Detected adapter. | Check that it names your real GPU. |
 | `[mod] GPU: not detected` | Detection failed (VM, remote session, unusual driver). | The mod still applies the profile; the upscaler is left unchanged. Run `build\gputest.exe`. |
@@ -74,15 +86,17 @@ The DLL never loaded. Check, in order:
 ## The mod loads but FPS does not change
 
 1. Confirm `[profile] apply = 1` in `f125_tune.ini`.
-2. Confirm the log says `profile applied`.
-3. Make sure the in-game preset is what you think it is. The delta stacks on the
-   preset; it does not lower the preset itself.
-4. If you opened the graphics menu after launching, the engine rewrote the file
-   for that session. Relaunch.
+2. Confirm the log says `profile applied`, `settings parser hooked` and
+   `N/N bool attributes pinned`.
+3. The log must show `enforce: <name> -> <tuned> (preset gave <value>, mode=<mode>)`
+   lines. If it does not, the game build differs and the hooks were skipped — the log
+   says so.
+4. With `enforce_mode = cheaper` and a preset already at/below the tuning, the mod is a
+   deliberate no-op. Use `target` if the engine is stuck on a low preset.
 5. Check the upscaler line. If it says `keep` / `unknown GPU`, set
    `[upscaler] mode = auto` (or force your vendor's backend).
 6. You may be CPU-bound, or capped by refresh rate / Frame Generation. See
-   [Why 140 and not 300](faq.md#why-do-i-get-140-fps-and-not-300).
+   [Why is my FPS not higher?](faq.md#why-is-my-fps-not-higher).
 
 ## The installer cannot find the game
 
@@ -97,11 +111,15 @@ Epic manifests, EA App and the default paths.
 
 If the game is in `Program Files`, run the installer **as administrator**.
 
-## Settings were reset / the mod stopped after a menu change
+## The settings file looks stock / the mod seems to have reverted
 
-Applying a preset in the graphics menu rewrites `hardware_settings_config.xml`
-for that session. This is a known limitation; relaunching re-applies the mod.
-Values in `[override]` are immune because they are hooked in memory.
+From v0.2.0 this is expected. `hardware_settings_config.xml` is an **engine export**:
+the engine writes its preset values into it and reads back those same values, and it may
+overwrite the tuned file at any point. The mod does not depend on the file for the main
+quality levers — it substitutes the tuned values inside the running engine (the `enforce:`
+log lines) and pins the boolean attributes in code, so the picture quality does not
+follow the file. The `apply` / `applyNode` hooks restore the tuned delta to the file after
+a menu change, but the file is cosmetic for those settings.
 
 ## I want my old settings back
 

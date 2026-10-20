@@ -9,14 +9,25 @@
 // engine side effects are preserved; we only overwrite the returned value.
 #include <windows.h>
 #include <stdint.h>
+#include <string.h>
 #include "hook.h"
+#include "scan.h"
 #include "tune.h"
+#include "enforce.h"
 
 // --- F1_25.exe (image base 0x140000000, no ASLR) -----------------------------
 // FUN_143a43b90: bool attribute getter  (node, name, uint8_t* out, uint8_t def)
 // FUN_143a43240: 32-bit attribute getter (node, name, uint32_t* out, uint32_t def)
 static const uintptr_t kRvaBoolGet   = 0x03a43b90u;
 static const uintptr_t kRvaScalarGet = 0x03a43240u;
+
+// Signatures so the getters can be re-derived on an updated game build.
+static const char* kSigBoolGet =
+    "41 56 56 57 53 48 83 EC 38 44 89 CB 4C 89 C7 49 89 CE 48 89 54 24 30 "
+    "48 8D 71 10 48 89 F1 E8 ?? ?? ?? ??";
+static const char* kSigScalarGet =
+    "41 56 56 57 53 48 83 EC 38 44 89 CF 4C 89 C3 49 89 CE 48 89 54 24 30 "
+    "48 8D 71 10 48 89 F1 E8 ?? ?? ?? ??";
 
 // Shared prologue (15 bytes): push r14; push rsi; push rdi; push rbx;
 // sub rsp,0x38; mov ebx,r9d; mov rdi,r8  -- all whole instructions, no
@@ -49,29 +60,54 @@ static uint64_t DetourScalar(void* node, const char* name, uint32_t* out, uint32
     return r;
 }
 
+static bool Readable(const void* p, size_t n) {
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(p, &mbi, sizeof(mbi)) == 0) return false;
+    if (mbi.State != MEM_COMMIT) return false;
+    const DWORD prot = mbi.Protect & 0xFF;
+    if (prot == PAGE_NOACCESS || prot == PAGE_GUARD) return false;
+    return (uintptr_t)p + n <= (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+}
+
 static bool PrologueMatches(void* fn, const uint8_t* expected) {
-    return memcmp(fn, expected, (size_t)kPatchLen) == 0;
+    return Readable(fn, (size_t)kPatchLen) &&
+           memcmp(fn, expected, (size_t)kPatchLen) == 0;
+}
+
+// Fast path: the known RVA with a matching prologue. Fallback: re-derive the
+// function by signature and re-check its prologue.
+static void* ResolveGetter(uintptr_t rva, const char* sig, const uint8_t* pro) {
+    uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+    if (PrologueMatches((void*)(base + rva), pro)) return (void*)(base + rva);
+
+    scan::PeImage img;
+    if (!scan::AttachLive(&img)) return nullptr;
+    const uintptr_t va = scan::FindPattern(img, sig);
+    if (va && PrologueMatches((void*)va, pro)) {
+        tune::Note("hooks: getter re-derived by signature (game updated?)");
+        return (void*)va;
+    }
+    return nullptr;
 }
 
 static void InstallHooks() {
-    uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-    void* pb = (void*)(base + kRvaBoolGet);
-    void* ps = (void*)(base + kRvaScalarGet);
-
     // Expected 15-byte prologues (verified against F1_25.exe 1.0.0).
     static const uint8_t kBoolSig[15]   = {0x41,0x56,0x56,0x57,0x53,0x48,0x83,0xEC,
                                            0x38,0x44,0x89,0xCB,0x4C,0x89,0xC7};
     static const uint8_t kScalarSig[15] = {0x41,0x56,0x56,0x57,0x53,0x48,0x83,0xEC,
                                            0x38,0x44,0x89,0xCF,0x4C,0x89,0xC3};
 
-    if (!PrologueMatches(pb, kBoolSig)) {
+    void* pb = ResolveGetter(kRvaBoolGet, kSigBoolGet, kBoolSig);
+    void* ps = ResolveGetter(kRvaScalarGet, kSigScalarGet, kScalarSig);
+
+    if (!pb) {
         tune::Note("WARN: bool getter signature mismatch - not patching");
     } else {
         g_orig_bool = (bool_get_t)hook::Install(pb, (void*)DetourBool, kPatchLen);
         if (!g_orig_bool) tune::Note("WARN: bool getter hook FAILED");
     }
 
-    if (!PrologueMatches(ps, kScalarSig)) {
+    if (!ps) {
         tune::Note("WARN: scalar getter signature mismatch - not patching");
     } else {
         g_orig_scalar = (scalar_get_t)hook::Install(ps, (void*)DetourScalar, kPatchLen);
@@ -113,6 +149,7 @@ BOOL WINAPI DllMain(HMODULE hMod, DWORD reason, LPVOID) {
         tune::SetSelf(hMod);
         tune::Init();
         tune::ApplyProfile();
+        enforce::Init();
         InstallHooks();
     }
     return TRUE;

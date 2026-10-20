@@ -20,6 +20,31 @@ void Note(const char* msg);
 // Returns true on success.
 bool ApplyProfile();
 
+// [profile] enforce = apply the tuned delta in-engine (past the preset clamp).
+// [profile] guard   = re-write the delta after the graphics menu re-applies a preset.
+// [profile] enforce_mode = target | cheaper | off
+//   target  : always use the tuned value (the mod defines the quality level)
+//   cheaper : use the cheaper of the preset value and the tuned value
+//   off     : disable all in-engine enforcement (file delta only)
+bool WantEnforce();
+bool WantGuard();
+bool EnforceTarget();
+// [enforce] bools = 0 disables the boolean pinning (only meaningful in target mode).
+bool WantEnforceBools();
+// [log] all = 1 (discovery mode). Used for diagnostics.
+bool LogAll();
+// [log] report = 1: write the hook-resolution report to the log.
+bool LogReport();
+
+// [enforce] per-attribute override of the in-engine table.
+// Returns true when the attribute is listed; *value is the replacement and
+// *disable is set for "off"/"disable"/"none"/"-" (skip that attribute).
+bool LookupEnforce(const char* name, int* value, int* disable);
+
+// Game / ini paths (for diagnostics).
+const wchar_t* ExeDir();
+const wchar_t* IniPath();
+
 // True if the setting should be overridden; writes the replacement value.
 bool LookupBool(const char* name, uint8_t* out);
 bool LookupScalar(const char* name, uint32_t* out);
