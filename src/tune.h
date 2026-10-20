@@ -1,6 +1,8 @@
 // Runtime setting-override table + discovery logging for the F1 25 renderer mod.
 #pragma once
 #include <stdint.h>
+#include "gpu.h"
+#include "profile.h"
 
 namespace tune {
 
@@ -35,6 +37,15 @@ bool WantEnforceBools();
 bool LogAll();
 // [log] report = 1: write the hook-resolution report to the log.
 bool LogReport();
+
+// F125_FORCE_SCAN=1 ignores the known addresses and resolves every hook by
+// signature/name. Used to test the self-healing path against the current build.
+bool ForceScan();
+
+// Test seam: the GPU -> backend mapping without touching the ini or the OS.
+namespace testing {
+profile::Upscaler ChooseUpscaler(const gpu::Info& g, const char* mode);
+}
 
 // [enforce] per-attribute override of the in-engine table.
 // Returns true when the attribute is listed; *value is the replacement and

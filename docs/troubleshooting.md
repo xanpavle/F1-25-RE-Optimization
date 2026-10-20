@@ -17,10 +17,11 @@ A healthy launch is short and looks like this:
 [mod] GPU: AMD Radeon RX 7800 XT (AMD 7000-series)
 [mod] upscaler: mode=auto -> FSR 3
 [mod] profile applied (tuned delta on hardware_settings_config.xml)
-[mod] enforce: int parser at the known RVA (table build)
+[mod] enforce: using known addresses (prologue verified)
+[mod] enforce: int parser at the known RVA (prologue verified)
 [mod] enforce: settings parser hooked (tuned values applied in-engine)
 [mod] enforce: 17 bool attributes pinned to the tuned profile (0 disabled, 0 unavailable)
-[mod] guard: preset hooks installed (delta auto-restored after menu changes)
+[mod] guard: preset hooks installed (apply=yes, applyNode=yes) - delta auto-restored after menu changes
 [mod] hooks installed OK
 ```
 
@@ -35,7 +36,8 @@ Find your line below.
 | `[mod] F1 25 RE-Optimization v0.2.0` | The DLL loaded with the game. | Good — the proxy is working. |
 | `[mod] session: exe=… / ini=…` | Which executable and ini the mod actually loaded. | Check both paths if you have several game copies. |
 | `[mod] hooks installed OK` | Both engine accessors were verified and patched. | Good. |
-| `[mod] enforce: int parser at the known RVA (table build)` | Same game build as the mod was derived from; the fast path was used. | Good. |
+| `[mod] enforce: int parser at the known RVA (prologue verified)` | Same game build as the mod was derived from; the fast path was used. | Good. |
+| `[mod] enforce: force-scan enabled - known addresses ignored, resolving by signature` | You created `f125_force_scan.txt`; the scanner is re-deriving everything. | Expected during testing. Delete the marker file afterwards; takes about 4 s. |
 | `[mod] enforce: int parser re-derived by signature (score N/12, …)` | A different game build; the scanner relocated the parser and sites. | Good — send the log if anything looks off. |
 | `[mod] enforce: WARN <name> unresolved (N candidate sites) - skipped` | The scanner could not uniquely re-derive that site after an update. | Harmless — that one value is left to the preset. |
 | `[mod] enforce: int parser not found (game build unsupported)` | The change was too large for the scanner. | The file delta still applies; open an issue with the log. |

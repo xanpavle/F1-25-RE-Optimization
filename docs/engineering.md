@@ -93,26 +93,37 @@ relocated by the simple hook engine.
 `E9 rel32` cannot reach an arbitrary DLL. The stolen prologue is copied into a
 trampoline followed by an absolute jump back to `target + patch_len`. Callers must
 pass a `patch_len` that covers whole, RIP-relative-free instructions — the
-prologues above were chosen for that property and are verified byte-for-byte before
-patching.
+prologues above were chosen for that property and are verified against a byte pattern
+(with the compiler's stack-frame immediate wildcarded) before patching.
 
 ### Signature scanning and name-based discovery (v0.2.0)
 
 `src/scan.cpp`:
 
 1. **Pattern match.** `FindPatternAll` searches the executable sections for a
-   wildcard byte pattern. The parsers share their prologue with look-alike
-   functions (11 and 3 candidates respectively), so bytes alone are not enough.
+   wildcard byte pattern. Prologue checks and signatures wildcard the stack-frame
+   immediate, so a compiler change that only resizes the frame does not break a hook.
+   The parsers share their prologue with look-alike functions (21 and 3 candidates
+   respectively), so bytes alone are not enough.
 2. **Score by name resolution.** For each candidate, every known attribute name is
    resolved: find the string constant, find every `lea reg,[rip+str]` that loads it,
    and take the first `call <candidate>` after it. The candidate that the names
-   resolve through most is the real parser (12/12 vs 0; 16/16 vs 0 here).
+   resolve through most is the real parser (12/12 vs 0; 17/17 vs 0 here). String VAs
+   are resolved once and reused across candidates; without that cache the fallback
+   scanned the 408 MB image 252 times (~36 s); with it the scan is ~7 s offline and
+   ~4 s live.
 3. **Re-derive sites.** A table site is valid iff the bytes before/at it are a
    `call` into the resolved parser. Invalid sites are re-derived by name; a site is
    only accepted if exactly one candidate exists, otherwise it is skipped.
 
-`FindCallAfter` is bounded by the containing section, and every memory read goes
-through a range check, so malformed images cannot fault the game.
+`FindCallAfter` is bounded by the containing section, and section sizes are clamped
+to `SizeOfImage`. A live image maps sections without `IMAGE_SCN_MEM_READ` as
+`PAGE_NOACCESS` (F1_25 has `.xpdata` and `.link`), so those are skipped; an offline
+file buffer would hide that difference.
+
+The known RVAs remain the fast path (0.6 s). Create `f125_force_scan.txt` next to
+`F1_25.exe` (or set `F125_FORCE_SCAN=1`) to ignore them and exercise the full
+self-healing path (~4 s); the log then records every re-derivation.
 
 ## Reproducing a re-derivation
 

@@ -21,8 +21,9 @@ Built and tested on a single machine, offline, single-player.
   online with it present may get you banned. Remove it before going online.
 - **Use at your own risk.** No warranty of any kind. You are responsible for your own
   machine, your own game install, and your own account.
-- **It edits your graphics settings file** (`hardware_settings_config.xml`) at launch.
-  An untouched backup (`.untuned`) is kept so you can revert.
+- **It edits your graphics settings file** (`hardware_settings_config.xml`) at launch and
+  enforces the tuned values inside the running engine. An untouched backup (`.untuned`)
+  is kept so you can revert.
 - Reverse engineering was performed on the author's own legally-owned copy of the game,
   for personal optimisation and educational purposes only. No game assets or code are
   redistributed here.
@@ -62,11 +63,29 @@ Benchmark: **F1 25 built-in benchmark, Austria, heavy rain, 20 cars, 1 lap, chas
 
 ---
 
+## What changed in v0.2.0
+
+v0.1.0 tuned the settings file. v0.2.0 makes those values survive the engine:
+
+| | v0.1.0 | v0.2.0 |
+|---|---|---|
+| File delta | applied at launch | applied, then restored after a graphics-menu preset change |
+| Preset clamp | could silently overwrite the tuning | 12 integers + 17 boolean sites enforced in-engine, after the clamp |
+| Game update | detours fail safe; RVAs re-derived by hand | parsers, hooks and sites re-derived by signature + attribute name at launch |
+| User control | fixed table | `[enforce]` per-attribute overrides; `target` / `cheaper` / `off` |
+| Verification | manual | `scantest` re-derives and re-checks all 29 sites offline |
+
+The **look is unchanged** from v0.1.0: the same tuned shadow, fog, crowd and
+texture-streaming values are used. What changed is that the engine can no longer
+revert them to the preset it happens to export.
+
+---
+
 ## What it does
 
 The mod ships a **proxy `dinput8.dll`** (F1 25 imports exactly one symbol from it,
 `DirectInput8Create`). Windows loads it at process start, *before* any game code runs.
-On load it does three things:
+On load it does the following:
 
 ### 1. Applies a tuned **delta** to your graphics settings
 
@@ -79,16 +98,16 @@ rain — is left exactly as the game wrote it.
 Be aware that the file is an **engine export**: the engine re-derives preset-restricted
 attributes at launch and rewrites the file with them, so the file delta alone cannot
 override a preset (see *Compatibility*). It is still applied, and it carries the settings
-the in-engine enforcement does not cover (SSAO/SSR quality, cloud RT scale, grass
-distance, reflection update mode, …). The enforcement in 1b is what makes the main
+the in-engine enforcement does not cover (SSAO algorithm / SSR quality, cloud RT scale,
+grass distance, reflection update mode, …). The enforcement in 1b is what makes the main
 quality levers stick.
 
 Tuned attributes include: volumetric fog map (1920×1080 → 512×288), shadow-map sizes
-(4096 → 2048), shadow sampling (3 → 2), SSR quality (4 → 2), SSAO (3 → 1), grass draw
-distance (120 m → 80 m), crowd billboards, car-reflection scale and cube-map update
-rate, particles, hair, god rays / lens streak / motion-blur v2, cloud RT scale, plus
-`cs_culling` (the engine's generic GPU culling, default **off**) and a texture-streaming
-bias.
+(4096 → 2048), shadow sampling (3 → 2), SSR quality (4 → 2), the SSAO algorithm,
+grass draw distance (120 m → 80 m), crowd billboards, car-reflection scale and cube-map
+update rate, particles, hair, god rays / lens streak / motion-blur v2, cloud RT scale,
+plus `cs_culling` (the engine's generic GPU culling, default **off**) and a
+texture-streaming bias.
 
 ### 1b. Re-applies the tuned values **inside the running engine**
 
@@ -115,11 +134,13 @@ preset clamp has already run:
 
 Booleans are read with a 5-byte `call strcmp(..., "true")` followed by `test eax,eax;
 sete`. Each of those calls is exactly 5 bytes, so the mod rewrites it to
-`mov eax, imm32` for 17 attributes: rain / heat-haze / ground-cover / grass / meshes stay
-**on**, night character shadows and volumetric fog stay **on**, and the cheap options
-(sky-shadow low-LOD, 16-bit sky shadows, crowd-in-shadows, god rays, lens streak,
-motion-blur v2) stay **off**. `enforce_mode = cheaper` never turns an effect *on* — the
-boolean pinning only runs in `target` mode.
+`mov eax, imm32` for all 17 boolean call sites (16 attributes — `godRays` is read twice):
+the visible effects (rain splashes / sheets / beads / high, track heat haze, ground
+cover, grass flattening, ground-cover meshes, night character shadows, volumetric fog)
+stay **on**, and the cheap options (sky-shadow low-LOD, 16-bit sky shadows,
+crowd-in-shadows, god rays, lens streak, motion-blur v2) stay **off**.
+`enforce_mode = cheaper` never turns an effect *on* — the boolean pinning only runs in
+`target` mode.
 
 This is pure code/value substitution — no engine memory is written — and unknown call
 sites fall straight through to the original parser, so it is safe on unexpected builds.
@@ -140,21 +161,27 @@ scanner (`src/scan.cpp`) does it automatically at launch:
 
 - the two parsers, `apply` / `applyNode` and the two attribute getters are found
   by **byte signature**;
+- prologue matches wildcard the compiler's stack-frame immediate, so a build that
+  only resizes a frame does not break a hook;
 - the parsers' signatures are shared with look-alike functions, so candidates are
   disambiguated by **name resolution**: a candidate is only accepted if the known
   attribute names actually resolve into calls through it (12/12 for the integer
-  parser, 16/16 for the boolean check);
+  parser, 17/17 for the boolean check);
 - each enforcement site is **validated** against the resolved parser, and any that
   no longer points at a `call <parser>` is **re-derived by name** — find the
   attribute string, find the `lea reg,[rip+str]` that loads it, and take the first
   `call <parser>` after it.
 
 The known RVAs are still tried first, so a matching build takes the fast path
-(zero overhead) and the scanner only runs when something does not validate. When a
-site cannot be resolved unambiguously it is skipped rather than guessed. The
-scanner is validated offline against the shipped executable by `build\scantest.exe`
-(part of `test.bat`), which re-derives and re-checks all 29 sites without launching
-the game.
+(0.6 s) and the scanner only runs when something does not validate (about 4 s for
+the full re-derivation). When a site cannot be resolved unambiguously it is skipped
+rather than guessed. The scanner is validated offline against the shipped executable
+by `build\scantest.exe` (part of `test.bat`), which re-derives and re-checks all 29
+sites without launching the game.
+
+To force the scanner on a build where the known addresses still appear valid, create
+an empty `f125_force_scan.txt` next to `F1_25.exe` and launch once; the log then shows
+`enforce: force-scan enabled` and every hook is re-derived. Delete the file afterwards.
 
 ### 1e. User-tunable enforcement (`[enforce]`)
 
@@ -181,9 +208,10 @@ through two generic accessors:
 | 32-bit getter | `0x03a43240` | `(node, name, uint32_t* out, uint32_t def)` |
 
 The mod detours both, lets the originals run (preserving engine side-effects), then
-overwrites the returned value for names listed under `[override]` in `f125_tune.ini`
-(grass/instance caps, VRS, async compute, and — if you enable it — the raytracing
-toggles, which are **immune** to the settings-file reset below).
+overwrites the returned value for names listed under `[override]` in `f125_tune.ini`:
+VRS, async compute, the v1/v2 ground-cover instance and mesh caps, the static / PVS
+instance caps, and — if you enable it — the raytracing toggles, which are **immune** to
+the settings-file reset below.
 
 ### 3. Selects the upscaler your GPU actually supports
 
@@ -211,9 +239,10 @@ exactly what the mod sees on your machine.
 - Windows 10/11 x64 (the proxy is a standard Win32 DLL).
 - Any DX12-capable GPU. The upscaler is selected automatically (DLSS / FSR 3 /
   XeSS / TAA) — see *GPU support* above.
-- **F1 25** PC build from the same game version this was derived from. If the game has
-  been updated, the detours will report a signature mismatch and skip (see
-  *Compatibility*).
+- **F1 25** PC build from the same game version this was derived from
+  (`1.0.141.7865`). If the game has been updated, v0.2.0 re-derives the hooks and
+  enforcement sites by signature and attribute name; anything that cannot be resolved
+  unambiguously is skipped and logged, never guessed (see *Compatibility*).
 - No runtime dependencies — the DLL links only against Windows system libraries
   (`KERNEL32`, `msvcrt`, `SHELL32`, `ADVAPI32`).
 - To build from source: mingw-w64 GCC.
@@ -291,8 +320,9 @@ Convenience scripts:
 - **Detour engine:** a minimal x64 inline hook (`src/hook.cpp`) using 14-byte absolute
   jumps (`FF 25 00000000 <ptr64>`) because `E9 rel32` cannot reach an arbitrary loaded
   DLL. It patches a 15-byte prologue and relocates it into a trampoline.
-- **Safety:** both target prologues are verified **byte-for-byte** before patching. On
-  mismatch the mod logs `signature mismatch` and skips — it never patches blindly.
+- **Safety:** every target prologue is verified against a byte pattern before patching,
+  with the compiler's stack-frame immediate wildcarded. On mismatch the mod logs
+  `signature mismatch` and skips — it never patches blindly.
 - **Stable RVAs:** `F1_25.exe` has `DllCharacteristics = 0x8120` (no `DYNAMIC_BASE`),
   so it loads at its preferred base `0x140000000` and the RVAs are constant.
 - **CFG:** the shellcode uses absolute indirect jumps with no CFG check instruction, so
@@ -382,12 +412,24 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
       enforcing the tuned values at the engine's settings-parser call sites, plus
       `hardwareSettings::Options::apply` / `applyNode` hooks that restore the file.
 - [x] In-engine enforcement extended to the shadow / fog / crowd / texture-streaming
-      integers and to 17 boolean attributes (rain, grass, god rays, …) in `v0.2.0`.
-- [ ] Extend in-engine enforcement to the remaining float settings (cloud RT scale, grass
-      distance) using the same return-address technique.
+      integers and to all 17 boolean call sites (rain, grass, god rays, …) in `v0.2.0`.
 - [x] Pattern-scan the prologues and re-derive enforcement sites by attribute name,
       so one DLL survives most game updates — `v0.2.0`, validated by `scantest`.
 - [x] User-tunable enforcement table via the `[enforce]` ini section — `v0.2.0`.
+- [ ] Extend in-engine enforcement to the remaining float settings (cloud RT scale, grass
+      distance) using the same return-address technique.
+- [ ] Investigate the engine's **cvar registry** (`Renderer.Gfx.*`, `JobQueueSystem.*`,
+      `Vehicle.*`, `Audio.*`, `ErpLoader.*`) — a name→value plane beyond the settings XML.
+      Mapped from the binary, **not implemented**; runtime writability is unproven. If it
+      is writable it would cover settings the XML does not expose.
+- [ ] Fine-grained SSAO tuning (`ASSAO`/`Hemi` quality level, blur passes, radius) instead
+      of the single `ssao` algorithm switch.
+- [ ] Texture-streaming / stutter module (`textureCullScale`, `meshDensityThreshold`,
+      streaming cache/reserve) as a complement to `sizeInMiB`.
+- [ ] CPU-side profile (`JobQueueSystem` worker count/spin, AI tyre substeps, audio
+      occluders) for full-grid 1% lows.
+- [ ] NVIDIA-only RT options (SER, DLSS Ray Reconstruction) behind capability checks —
+      needs RTX 40/50 testers; no effect on the AMD reference machine.
 - [ ] Optional "RT-lite" override profile (RT AO / DDGI / shadows off via the engine
       knobs — menu-proof).
 - [ ] Per-GPU preset table (`safe` / `balanced` / `aggressive`) instead of the single

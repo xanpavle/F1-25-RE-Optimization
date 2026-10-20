@@ -5,7 +5,7 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
-## [0.2.0] - 2026-10-19
+## [0.2.0] - 2026-10-20
 
 **The tuned delta applies in-engine, with self-healing addresses and user-tunable enforcement.**
 
@@ -22,9 +22,10 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - **Boolean attributes are pinned too.** The shared boolean check
   (`FUN_14534d918`, RVA `0x534d918`) is called through a 5-byte `call` that the mod
   rewrites to a 5-byte `mov eax, imm32`, so the setting cannot be reverted by the
-  preset. 17 attributes are pinned to the tuned profile: rain (splashes / sheets /
-  beads / high / heat haze), ground cover, grass flattening, meshes, volumetric fog
-  and night character shadows stay **on**; sky-shadow low-LOD, 16-bit sky shadows,
+  preset. 17 boolean call sites (16 attributes; `godRays` is read twice) are pinned to
+  the tuned profile: rain (splashes / sheets / beads / high), track heat haze, ground
+  cover, grass flattening, ground-cover meshes, volumetric fog and night character
+  shadows stay **on**; sky-shadow low-LOD, 16-bit sky shadows,
   crowd-in-shadows, god rays, lens streak and motion-blur v2 stay **off**. Boolean
   pinning only runs in `enforce_mode = target`.
 - **Signature scanner (`src/scan.cpp`).** Maps the target PE (live process or a file
@@ -33,12 +34,19 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - **Name-driven site discovery.** The parser signatures are shared with look-alike
   functions, so candidates are disambiguated by scoring: a candidate is only accepted
   if the known attribute names resolve into calls through it (12/12 vs 0 for the
-  decoys; 16/16 for the boolean check). Enforcement sites that no longer validate
+  decoys; 17/17 for the boolean check). Enforcement sites that no longer validate
   against the resolved parser are re-derived by attribute name (string constant →
   `lea reg,[rip+str]` → first `call <parser>` after it).
 - **`scantest` (`build\scantest.exe`).** Offline validator: loads the game image from
   disk and re-derives/re-checks all 12 integer + 17 boolean sites without launching
   the game. Wired into `test.bat`.
+- **Force-scan recovery switch.** Create `f125_force_scan.txt` next to `F1_25.exe`
+  (or set `F125_FORCE_SCAN=1`) to ignore the known addresses and resolve the parsers,
+  getters, `apply` / `applyNode` and every enforcement site by signature/name.
+  Verified live: 12/12 integer names, 17/17 boolean, all 29 sites, ~4 s.
+- **GPU-mapping test.** `build\tunetest.exe` checks the auto matrix (RTX -> DLSS,
+  GTX -> FSR 3, AMD -> FSR 3, Arc -> XeSS, unknown -> keep) and every forced mode,
+  alongside the ini/override checks.
 - **`[enforce]` ini section.** Override any enforced value by attribute name, or
   disable it with `off`; `bools = 0` disables the boolean pinning as a group.
   Unknown/ambiguous sites are always skipped, never guessed.
@@ -64,6 +72,12 @@ Versioning: [Semantic Versioning](https://semver.org/).
   therefore have no effect.
 - **The settings file could be truncated by an interrupted write.** It is now written
   to a `.tmp` and atomically moved into place.
+- **The self-healing path could terminate the game.** Live string scans walked
+  sections mapped `PAGE_NOACCESS` (`.xpdata` and `.link` have no `MEM_READ` flag);
+  those are now skipped, and section sizes are clamped to `SizeOfImage`.
+- **`AttachLive` always failed** because it validated the PE headers against a zero
+  size; the fast path hid it, so the scanner had never actually run in-process. It now
+  reports the real `SizeOfImage`, and `scantest` covers it.
 - **A wrong image base could fault at startup** because the getter prologues were
   compared with `memcmp` without a readability check. They are now guarded.
 - **Hex literals (`0x1e`) were mis-parsed as floats** in the ini.
@@ -72,9 +86,14 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- Enforcement and getter addresses are validated byte-for-byte against the resolved
-  parser before patching; the hard-coded RVAs are still the fast path, so a matching
-  build is unchanged and the scanner only runs when something does not validate.
+- Enforcement and getter addresses are validated against the resolved parser before
+  patching; the hard-coded RVAs are still the fast path, so a matching build is
+  unchanged and the scanner only runs when something does not validate.
+- Prologue matching uses wildcard patterns: the stack-frame immediate is ignored, so
+  a build that only changes a frame size still hooks. The preset guard now arms when
+  either `apply` or `applyNode` resolves (previously both were required).
+- `ResolveParser` caches the attribute-string VAs instead of rescanning the 408 MB
+  image per candidate (full fallback: 36 s -> ~4 s).
 - The discovery log and the override table are hash-indexed (no more O(n²) when
   `[log] all = 1`), and the log handle is kept open for the session instead of opening
   the file per line.
@@ -86,7 +105,7 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 - Enforcement is pure value substitution: no engine memory is written. Unknown call
   sites fall through to the original parser, and every hook still verifies its target
-  prologue byte-for-byte before patching.
+  prologue against a byte pattern (stack-frame immediate wildcarded) before patching.
 - Each enforced value follows `[profile] enforce_mode`:
   - `target` (default) — the tuned value always wins, so the mod defines the quality
     level even when the engine's preset is lower than what you selected.
@@ -107,7 +126,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
   to them is tracked in the README roadmap.
 - The v0.2.0 enforcement table was re-derived and verified against the live game: the
   integer entries key on the *return address* of each parser call, and the boolean sites
-  were matched byte-for-byte to the shared `strcmp`-to-`"true"` check.
+  were matched against the shared `strcmp`-to-`"true"` pattern (stack-frame immediate
+  wildcarded).
 
 ## [0.1.0] - 2026-10-18
 

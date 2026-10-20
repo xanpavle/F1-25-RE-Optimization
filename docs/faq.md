@@ -140,6 +140,13 @@ hard-coded ones:
 If the log shows `int parser not found` the change was too large for the scanner; open
 an issue with `f125_tune.log` and the exe size/timestamp from the `session:` lines.
 
+To force the scanner even when the known addresses still look valid (for example to
+check a fresh game build), create an empty file `f125_force_scan.txt` next to
+`F1_25.exe` and launch once. The log then shows
+`enforce: force-scan enabled` and every hook is re-derived by signature/name. Delete
+the file afterwards. The full scan takes about 4 seconds; the normal path takes under
+a second.
+
 ## Did it actually work?
 
 Open `f125_tune.log` in the game folder. A healthy v0.2.0 launch looks like:
@@ -150,10 +157,11 @@ Open `f125_tune.log` in the game folder. A healthy v0.2.0 launch looks like:
 [mod] GPU: AMD Radeon RX 7800 XT (AMD 7000-series)
 [mod] upscaler: mode=auto -> FSR 3
 [mod] profile applied (tuned delta on hardware_settings_config.xml)
-[mod] enforce: int parser at the known RVA (table build)
+[mod] enforce: using known addresses (prologue verified)
+[mod] enforce: int parser at the known RVA (prologue verified)
 [mod] enforce: settings parser hooked (tuned values applied in-engine)
 [mod] enforce: 17 bool attributes pinned to the tuned profile (0 disabled, 0 unavailable)
-[mod] guard: preset hooks installed (delta auto-restored after menu changes)
+[mod] guard: preset hooks installed (apply=yes, applyNode=yes) - delta auto-restored after menu changes
 [mod] hooks installed OK
 [mod] enforce: worldShadowMapSize -> 2048 (preset gave 1024, mode=target)
 [mod] enforce: volumetricFogMapWidth -> 512 (preset gave 256, mode=target)
@@ -162,7 +170,7 @@ Open `f125_tune.log` in the game folder. A healthy v0.2.0 launch looks like:
 
 The `enforce:` lines are the proof: they show the preset's value and the tuned value
 that replaced it. On a game update you may instead see
-`enforce: int parser re-derived by signature (score 12/12, 11 candidates)` and
+`enforce: int parser re-derived by signature (score 12/12, 21 candidates)` and
 `report: int sites table=… discovered=… missing=…`, which means the scanner took over.
 Set `[log] all = 1` to also dump every settings-parser call site, or
 `[log] report = 1` for the per-run resolution report.

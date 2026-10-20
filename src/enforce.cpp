@@ -22,40 +22,41 @@ static const uintptr_t kRvaParseBool = 0x534d918u;
 static const uintptr_t kRvaApply     = 0x40217f0u;
 static const uintptr_t kRvaApplyNode = 0x40226c0u;
 
-// Expected prologues (whole instructions; nothing RIP-relative).
-static const unsigned char kProParse[] = {
-    0x48, 0x89, 0x5C, 0x24, 0x08,        // mov [rsp+8], rbx
-    0x48, 0x89, 0x7C, 0x24, 0x10,        // mov [rsp+0x10], rdi
-    0x55,                                // push rbp
-    0x48, 0x8B, 0xEC,                    // mov rbp, rsp
-    0x48, 0x83, 0xEC, 0x70,              // sub rsp, 0x70
-};
-static const unsigned char kProApply[] = {
-    0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54,   // push r15/r14/r13/r12
-    0x56, 0x57, 0x55, 0x53,                            // push rsi/rdi/rbp/rbx
-    0x48, 0x81, 0xEC, 0xF8, 0x02, 0x00, 0x00,          // sub rsp, 0x2f8
-};
-static const unsigned char kProApplyNode[] = {
-    0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54,
-    0x56, 0x57, 0x55, 0x53,
-    0x48, 0x81, 0xEC, 0x98, 0x00, 0x00, 0x00,          // sub rsp, 0x98
-};
+// Prologue shapes, matched as patterns rather than raw bytes. The trailing
+// stack-frame immediate is wildcarded: its value changes between game builds and
+// the instruction length is unaffected, so the relocated bytes stay valid.
+//
+// Every prologue here is a sequence of whole instructions with no RIP-relative
+// operand and no branch, which is what makes copying it into a trampoline safe.
+static const char* kPatParseCheck =
+    "48 89 5C 24 08 48 89 7C 24 10 55 48 8B EC 48 83 EC ??";  // 18 bytes
+static const char* kPatParsePatch =
+    "48 89 5C 24 08 48 89 7C 24 10 55 48 8B EC";              // 14 bytes
+static const int   kLenParsePatch = 14;  // stops before `sub rsp, imm`
+static const char* kPatApply =
+    "41 57 41 56 41 55 41 54 56 57 55 53 48 81 EC ?? ?? ?? ??";  // 19 bytes
+static const int   kLenApply = 19;
+static const char* kPatApplyNode = kPatApply;  // same prologue shape
+static const int   kLenApplyNode = 19;
+static const char* kPatParseBool =
+    "48 83 EC 28 83 3D ?? ?? ?? ?? 00 75 2D 48 85 C9";  // 16 bytes
 
 // Signatures used to re-derive the addresses on an updated game build. See
-// src/scan.cpp. The parsers share their prologue with other functions, so the
+// src/scan.cpp. Frame sizes are wildcarded so a compiler change does not defeat
+// the scan. The parsers share their prologue with other functions, so the
 // scanner disambiguates them by name resolution rather than by bytes alone.
 static const char* kSigParseInt =
-    "48 89 5C 24 08 48 89 7C 24 10 55 48 8B EC 48 83 EC 70 48 83 65 C0 00 "
+    "48 89 5C 24 08 48 89 7C 24 10 55 48 8B EC 48 83 EC ?? 48 83 65 C0 00 "
     "83 3D ?? ?? ?? ?? 00 C6 45 D0 00 C6 45 E8 00 C6 45 F0 00 C6 45 F8 00 75 10 "
     "0F 10 05 ?? ?? ?? ?? C6 45 E8 01";
 static const char* kSigParseBool =
     "48 83 EC 28 83 3D ?? ?? ?? ?? 00 75 2D 48 85 C9 75 1A E8 ?? ?? ?? ?? "
     "C7 00 16 00 00 00 E8 ?? ?? ?? ?? B8 FF FF FF 7F 48 83 C4 28 C3";
 static const char* kSigApply =
-    "41 57 41 56 41 55 41 54 56 57 55 53 48 81 EC F8 02 00 00 4C 89 CE 4D 89 C4 "
+    "41 57 41 56 41 55 41 54 56 57 55 53 48 81 EC ?? ?? ?? ?? 4C 89 CE 4D 89 C4 "
     "48 89 D5 48 89 4C 24 78 80 3D ?? ?? ?? ?? 00 75 6A";
 static const char* kSigApplyNode =
-    "41 57 41 56 41 55 41 54 56 57 55 53 48 81 EC 98 00 00 00 48 89 D6 49 89 CE "
+    "41 57 41 56 41 55 41 54 56 57 55 53 48 81 EC ?? ?? ?? ?? 48 89 D6 49 89 CE "
     "4C 8B 62 18 48 8B 59 78 48 2B 59 70 74 46";
 
 static uintptr_t g_base = 0x140000000u;
@@ -158,13 +159,15 @@ bool Readable(const void* p, size_t n) {
     return true;
 }
 
-bool PrologueOk(uintptr_t va, const unsigned char* pro, size_t n) {
-    if (!Readable((const void*)va, n)) return false;
-    return memcmp((const void*)va, pro, n) == 0;
-}
-
 void EnsureImage() {
     if (!g_img_ok) g_img_ok = scan::AttachLive(&g_img);
+}
+
+// Wildcard prologue match (`?` = any byte) against the live module image.
+bool MatchPrologue(uintptr_t va, const char* pattern) {
+    EnsureImage();
+    if (!g_img_ok) return false;
+    return scan::MatchAt(g_img, va, pattern);
 }
 
 void EnsureIndex() {
@@ -198,12 +201,27 @@ bool BoolSiteValid(uintptr_t call_rva, uintptr_t parseBool) {
 // Resolves the int parser: fast path is the known RVA with a matching prologue;
 // the fallback scans the image and scores candidates by name resolution.
 uintptr_t ResolveIntParser() {
-    if (PrologueOk(g_base + kRvaParseInt, kProParse, sizeof(kProParse))) {
-        Note("enforce: int parser at the known RVA (table build)");
+    if (!tune::ForceScan() && MatchPrologue(g_base + kRvaParseInt, kPatParseCheck)) {
+        Note("enforce: int parser at the known RVA (prologue verified)");
         return g_base + kRvaParseInt;
     }
     EnsureIndex();
-    if (!g_img_ok || !g_idx_ok) return 0;
+    if (!g_img_ok) {
+        Note("enforce: live image mapping failed - cannot self-heal");
+        return 0;
+    }
+    if (!g_idx_ok) {
+        Note("enforce: LEA index build failed - cannot self-heal");
+        return 0;
+    }
+    {
+        char line[128];
+        _snprintf(line, sizeof(line), "enforce: live image mapped, LEA index %d entries",
+                  g_idx.count);
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+    }
+    Note("enforce: resolving the int parser by signature + attribute names");
 
     const char* keys[32];
     int nk = 0;
@@ -225,13 +243,8 @@ uintptr_t ResolveIntParser() {
 }
 
 uintptr_t ResolveBoolParser() {
-    // The bool parser is not hooked; validate its known prologue bytes.
-    static const unsigned char kProBool[] = {
-        0x48, 0x83, 0xEC, 0x28, 0x83, 0x3D, 0xBD, 0x69,
-        0xCC, 0x00, 0x00, 0x75, 0x2D, 0x48, 0x85, 0xC9,
-    };
-    if (Readable((const void*)(g_base + kRvaParseBool), sizeof(kProBool)) &&
-        memcmp((const void*)(g_base + kRvaParseBool), kProBool, sizeof(kProBool)) == 0) {
+    // The bool parser is not hooked; only its shape is verified.
+    if (!tune::ForceScan() && MatchPrologue(g_base + kRvaParseBool, kPatParseBool)) {
         return g_base + kRvaParseBool;
     }
     EnsureIndex();
@@ -464,7 +477,7 @@ asm(
     "  jmp *%rcx\n");
 
 // Verifies a prologue and installs `detour` over it. Returns the trampoline.
-static void* PatchAt(uintptr_t va, const unsigned char* pro, size_t n, void* detour) {
+static void* PatchAt(uintptr_t va, const char* pro, size_t n, void* detour) {
     void* target = (void*)va;
     MEMORY_BASIC_INFORMATION mbi;
     if (VirtualQuery(target, &mbi, sizeof(mbi)) == 0) return nullptr;
@@ -478,7 +491,7 @@ static void* PatchAt(uintptr_t va, const unsigned char* pro, size_t n, void* det
     if ((uintptr_t)target + n > (uintptr_t)mbi.BaseAddress + mbi.RegionSize) {
         return nullptr;
     }
-    if (memcmp(target, pro, n) != 0) return nullptr;
+    if (!MatchPrologue(va, pro)) return nullptr;
     return hook::Install(target, detour, (int)n);
 }
 
@@ -534,19 +547,29 @@ static int PatchBoolSites() {
 // Resolves hardwareSettings::Options::apply / applyNode.
 static uintptr_t ResolveApply(bool node) {
     const uintptr_t rva = node ? kRvaApplyNode : kRvaApply;
-    const unsigned char* pro = node ? kProApplyNode : kProApply;
-    const size_t n = node ? sizeof(kProApplyNode) : sizeof(kProApply);
-    if (PrologueOk(g_base + rva, pro, n)) return g_base + rva;
+    const char* pro = node ? kPatApplyNode : kPatApply;
+    if (!tune::ForceScan() && MatchPrologue(g_base + rva, pro)) return g_base + rva;
 
     EnsureImage();
     if (!g_img_ok) return 0;
     const uintptr_t va = scan::FindPattern(g_img, node ? kSigApplyNode : kSigApply);
-    if (va && PrologueOk(va, pro, n)) return va;
+    if (va && MatchPrologue(va, pro)) {
+        Note(node ? (tune::ForceScan()
+                         ? "guard: applyNode re-derived by scan (force-scan)"
+                         : "guard: applyNode re-derived by signature (game updated?)")
+                  : (tune::ForceScan()
+                         ? "guard: apply re-derived by scan (force-scan)"
+                         : "guard: apply re-derived by signature (game updated?)"));
+        return va;
+    }
     return 0;
 }
 
 void Init() {
     g_base = (uintptr_t)GetModuleHandleW(nullptr);
+    Note(tune::ForceScan()
+             ? "enforce: force-scan enabled - known addresses ignored, resolving by signature"
+             : "enforce: using known addresses (prologue verified)");
 
     const uintptr_t parseInt = tune::WantEnforce() ? ResolveIntParser() : 0;
     const uintptr_t parseBool = tune::WantEnforce() ? ResolveBoolParser() : 0;
@@ -556,7 +579,7 @@ void Init() {
         ResolveSites(parseInt, parseBool);
         ApplyOverrides();
 
-        void* t = PatchAt(parseInt, kProParse, sizeof(kProParse),
+        void* t = PatchAt(parseInt, kPatParsePatch, kLenParsePatch,
                           (void*)&DetourParseInt);
         if (t) {
             g_parseTramp = (ParseIntFn)t;
@@ -573,16 +596,23 @@ void Init() {
     if (tune::WantGuard()) {
         const uintptr_t apply = ResolveApply(false);
         const uintptr_t applyNode = ResolveApply(true);
-        void* ta = apply ? PatchAt(apply, kProApply, sizeof(kProApply), (void*)&ApplyDetour)
+        void* ta = apply ? PatchAt(apply, kPatApply, kLenApply, (void*)&ApplyDetour)
                          : nullptr;
-        void* tn = applyNode ? PatchAt(applyNode, kProApplyNode, sizeof(kProApplyNode),
+        void* tn = applyNode ? PatchAt(applyNode, kPatApplyNode, kLenApplyNode,
                                        (void*)&ApplyNodeDetour)
                              : nullptr;
-        if (ta && tn) {
-            g_applyTramp = ta;
-            g_applyNodeTramp = tn;
+        // Either entry point is enough: both lead to the same preset re-apply.
+        if (ta) g_applyTramp = ta;
+        if (tn) g_applyNodeTramp = tn;
+        if (ta || tn) {
             g_thread = CreateThread(nullptr, 0, Watcher, nullptr, 0, nullptr);
-            Note("guard: preset hooks installed (delta auto-restored after menu changes)");
+            char line[192];
+            _snprintf(line, sizeof(line),
+                      "guard: preset hooks installed (apply=%s, applyNode=%s) - "
+                      "delta auto-restored after menu changes",
+                      ta ? "yes" : "no", tn ? "yes" : "no");
+            line[sizeof(line) - 1] = 0;
+            Note(line);
         } else {
             Note("guard: preset hooks unavailable on this build - file delta only");
         }

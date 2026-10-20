@@ -114,14 +114,19 @@ int EnumSections(const PeImage& img, Section* out, int max, bool exec_only) {
         const uint32_t vaddr = *(const uint32_t*)(sh + 12);
         const uint32_t chars = *(const uint32_t*)(sh + 36);
         if (vsize == 0) continue;
+        // IMAGE_SCN_MEM_READ. The loader maps a section without it as
+        // PAGE_NOACCESS in a live process (F1_25 has .xpdata and .link like
+        // this), so scanning them would fault; a file buffer is always readable.
+        if (!(chars & 0x40000000u)) continue;
         if (exec_only && !(chars & 0x20000000u)) continue;  // MEM_EXECUTE
-        if (vaddr + vsize > img.size) {
-            // Clamp to the image (raw PE files can have VirtualSize > file).
-            if (vaddr >= (uint32_t)img.size) continue;
-        }
+        if (vaddr >= (uint32_t)img.size) continue;
+        // Clamp to the mapped image. A live module is mapped to exactly
+        // SizeOfImage, so trusting VirtualSize can walk into an unmapped page.
+        size_t nbytes = vsize;
+        if (nbytes > img.size - vaddr) nbytes = img.size - vaddr;
         out[n].va = img.base + vaddr;
         out[n].ptr = img.data + vaddr;
-        out[n].size = vsize;
+        out[n].size = nbytes;
         out[n].chars = chars;
         ++n;
     }
@@ -176,13 +181,21 @@ bool AttachLive(PeImage* out) {
     out->base = (uintptr_t)mod;
     out->data = (const uint8_t*)mod;
     out->owned = false;
+    // The real size comes from the PE optional header, but ImageHeaders needs a
+    // bound to validate the DOS/NT offsets while reading it. A mapped module is
+    // at least one page; use that as the provisional limit.
+    out->size = 0x1000;
 
     const DosHeader* dos = (const DosHeader*)out->data;
-    if (dos->e_magic != 0x5A4D) return false;
+    if (dos->e_magic != 0x5A4D) { out->size = 0; return false; }
     const size_t nt = (size_t)dos->e_lfanew;
+    if (nt + 12 > out->size) { out->size = 0; return false; }
     out->timestamp = *(const uint32_t*)(out->data + nt + 4 + 8);
     uint32_t nsec = 0, soh = 0, soi = 0;
-    if (!ImageHeaders(*out, &nsec, &soh, &soi) || soi == 0) return false;
+    if (!ImageHeaders(*out, &nsec, &soh, &soi) || soi == 0) {
+        out->size = 0;
+        return false;
+    }
     out->size = soi;
     return true;
 }
@@ -322,6 +335,24 @@ int FindPatternAll(const PeImage& img, const char* pattern, uintptr_t* out, int 
     return found;
 }
 
+bool MatchAt(const PeImage& img, uintptr_t va, const char* pattern) {
+    Pat p;
+    if (!ParsePattern(pattern, &p)) return false;
+    if (!InImage(img, va)) return false;
+    if (va + (uintptr_t)p.len > img.base + img.size) return false;
+    const uint8_t* b = PtrFor(img, va);
+    if (!b) return false;
+    for (int i = 0; i < p.len; ++i) {
+        if (p.mask[i] && b[i] != p.bytes[i]) return false;
+    }
+    return true;
+}
+
+int PatternLength(const char* pattern) {
+    Pat p;
+    return ParsePattern(pattern, &p) ? p.len : 0;
+}
+
 int FindStringVas(const PeImage& img, const char* s, uintptr_t* out, int max) {
     if (!s || !*s || max <= 0) return 0;
     const size_t len = strlen(s);
@@ -416,14 +447,12 @@ static uintptr_t FindCallAfter(const PeImage& img, uintptr_t from, uintptr_t cal
     return 0;
 }
 
-int FindSites(const PeImage& img, const LeaIndex& idx, const char* name,
-              uintptr_t callee, size_t window, bool require_sete,
-              uintptr_t* out, int max) {
-    if (!name || !idx.refs || max <= 0) return 0;
-    uintptr_t strs[256];
-    const int ns = FindStringVas(img, name, strs, 256);
+int FindSitesAt(const PeImage& img, const LeaIndex& idx, const uintptr_t* strs,
+                int str_count, uintptr_t callee, size_t window, bool require_sete,
+                uintptr_t* out, int max) {
+    if (!strs || !idx.refs || max <= 0) return 0;
     int found = 0;
-    for (int si = 0; si < ns; ++si) {
+    for (int si = 0; si < str_count; ++si) {
         int i = LowerBound(idx, strs[si]);
         for (; i < idx.count && idx.refs[i].target == strs[si]; ++i) {
             const uintptr_t ret =
@@ -439,6 +468,15 @@ int FindSites(const PeImage& img, const LeaIndex& idx, const char* name,
     return found;
 }
 
+int FindSites(const PeImage& img, const LeaIndex& idx, const char* name,
+              uintptr_t callee, size_t window, bool require_sete,
+              uintptr_t* out, int max) {
+    if (!name) return 0;
+    uintptr_t strs[256];
+    const int ns = FindStringVas(img, name, strs, 256);
+    return FindSitesAt(img, idx, strs, ns, callee, window, require_sete, out, max);
+}
+
 uintptr_t ResolveParser(const PeImage& img, const LeaIndex& idx,
                         const char* signature, const char* const* names,
                         int name_count, uintptr_t callee_hint, int* best_score,
@@ -450,13 +488,30 @@ uintptr_t ResolveParser(const PeImage& img, const LeaIndex& idx,
         if (best_score) *best_score = -1;
         return 0;
     }
+
+    // Resolve each attribute-name string once. Scanning the image per
+    // (candidate, name) pair is what made the fallback path take ~36 s.
+    const int kMaxVas = 256;
+    uintptr_t* vas = (uintptr_t*)calloc((size_t)name_count * kMaxVas, sizeof(uintptr_t));
+    int* counts = (int*)calloc((size_t)name_count, sizeof(int));
+    if (!vas || !counts) {
+        free(vas);
+        free(counts);
+        if (best_score) *best_score = -1;
+        return 0;
+    }
+    for (int i = 0; i < name_count; ++i) {
+        counts[i] = FindStringVas(img, names[i], vas + (size_t)i * kMaxVas, kMaxVas);
+    }
+
     int best = -1;
     uintptr_t bestVa = 0;
     for (int c = 0; c < nc; ++c) {
         int score = 0;
         uintptr_t tmp[4];
         for (int i = 0; i < name_count; ++i) {
-            if (FindSites(img, idx, names[i], cands[c], 0x100, false, tmp, 4) > 0)
+            if (FindSitesAt(img, idx, vas + (size_t)i * kMaxVas, counts[i], cands[c],
+                            0x100, false, tmp, 4) > 0)
                 ++score;
         }
         if (score > best || (score == best && cands[c] == callee_hint)) {
@@ -464,6 +519,8 @@ uintptr_t ResolveParser(const PeImage& img, const LeaIndex& idx,
             bestVa = cands[c];
         }
     }
+    free(vas);
+    free(counts);
     if (best_score) *best_score = best;
     return best > 0 ? bestVa : 0;
 }

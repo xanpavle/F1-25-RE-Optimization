@@ -395,8 +395,8 @@ const char* UpName(profile::Upscaler up) {
     }
 }
 
-profile::Upscaler ChooseUpscaler(const gpu::Info& g) {
-    const char* m = g_upscaler_mode;
+profile::Upscaler ChooseUpscalerFor(const gpu::Info& g, const char* mode) {
+    const char* m = (mode && *mode) ? mode : "auto";
 
     if (!_stricmp(m, "keep") || !_stricmp(m, "none")) return profile::Upscaler::Keep;
     if (!_stricmp(m, "off"))  return profile::Upscaler::Off;
@@ -415,6 +415,10 @@ profile::Upscaler ChooseUpscaler(const gpu::Info& g) {
         default:
             return profile::Upscaler::Keep;
     }
+}
+
+profile::Upscaler ChooseUpscaler(const gpu::Info& g) {
+    return ChooseUpscalerFor(g, g_upscaler_mode);
 }
 
 void SessionInfo() {
@@ -556,6 +560,23 @@ bool WantEnforceBools() { return g_enforce_bools; }
 bool LogAll()      { return g_log_all; }
 bool LogReport()   { return g_log_report; }
 
+bool ForceScan() {
+    static int cached = -1;
+    if (cached < 0) {
+        char v[16] = {0};
+        const DWORD n = GetEnvironmentVariableA("F125_FORCE_SCAN", v, sizeof(v));
+        int on = (n > 0 && v[0] != '0' && v[0] != 'n' && v[0] != 'N') ? 1 : 0;
+        if (!on && g_exe_dir[0]) {
+            wchar_t path[MAX_PATH];
+            lstrcpyW(path, g_exe_dir);
+            lstrcatW(path, L"\\f125_force_scan.txt");
+            on = GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES ? 1 : 0;
+        }
+        cached = on;
+    }
+    return cached != 0;
+}
+
 bool LookupEnforce(const char* name, int* value, int* disable) {
     if (!name) return false;
     for (int i = 0; i < g_enfov_count; ++i) {
@@ -680,5 +701,11 @@ bool ApplyProfile() {
     Note("profile applied (tuned delta on hardware_settings_config.xml)");
     return true;
 }
+
+namespace testing {
+profile::Upscaler ChooseUpscaler(const gpu::Info& g, const char* mode) {
+    return ChooseUpscalerFor(g, mode);
+}
+}  // namespace testing
 
 }  // namespace tune

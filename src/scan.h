@@ -50,6 +50,14 @@ uintptr_t FindPattern(const PeImage& img, const char* pattern, uintptr_t after =
 // All matches, up to `max`. Returns the number found (capped at max).
 int FindPatternAll(const PeImage& img, const char* pattern, uintptr_t* out, int max);
 
+// True when `pattern` matches the image bytes at `va`. Wildcards ("?" / "??")
+// let a prologue check ignore operands that change between game builds (for
+// example a stack-frame size) while still pinning the instruction shape.
+bool MatchAt(const PeImage& img, uintptr_t va, const char* pattern);
+
+// Number of bytes in a pattern (wildcards count as one byte). 0 if invalid.
+int PatternLength(const char* pattern);
+
 // VAs of the NUL-terminated ASCII string `s`. Returns the count (capped).
 int FindStringVas(const PeImage& img, const char* s, uintptr_t* out, int max);
 
@@ -76,6 +84,13 @@ void LeaFree(LeaIndex* idx);
 int FindSites(const PeImage& img, const LeaIndex& idx, const char* name,
               uintptr_t callee, size_t window, bool require_sete,
               uintptr_t* out, int max);
+
+// Same, but with pre-resolved string VAs. Use this when the same name is
+// checked against several candidate parsers: the string scan is the expensive
+// part, so it must not be repeated per candidate.
+int FindSitesAt(const PeImage& img, const LeaIndex& idx, const uintptr_t* strs,
+                int str_count, uintptr_t callee, size_t window, bool require_sete,
+                uintptr_t* out, int max);
 
 // Picks the parser among the matches of `signature` that the known attribute
 // names resolve through the most. Returns its VA, or 0 when nothing matches.

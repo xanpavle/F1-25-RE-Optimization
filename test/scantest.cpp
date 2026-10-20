@@ -14,23 +14,23 @@
 
 // --- signatures (must stay in sync with src/enforce.cpp) --------------------
 static const char* kSigParseInt =
-    "48 89 5C 24 08 48 89 7C 24 10 55 48 8B EC 48 83 EC 70 48 83 65 C0 00 "
+    "48 89 5C 24 08 48 89 7C 24 10 55 48 8B EC 48 83 EC ?? 48 83 65 C0 00 "
     "83 3D ?? ?? ?? ?? 00 C6 45 D0 00 C6 45 E8 00 C6 45 F0 00 C6 45 F8 00 75 10 "
     "0F 10 05 ?? ?? ?? ?? C6 45 E8 01";
 static const char* kSigParseBool =
     "48 83 EC 28 83 3D ?? ?? ?? ?? 00 75 2D 48 85 C9 75 1A E8 ?? ?? ?? ?? "
     "C7 00 16 00 00 00 E8 ?? ?? ?? ?? B8 FF FF FF 7F 48 83 C4 28 C3";
 static const char* kSigApply =
-    "41 57 41 56 41 55 41 54 56 57 55 53 48 81 EC F8 02 00 00 4C 89 CE 4D 89 C4 "
+    "41 57 41 56 41 55 41 54 56 57 55 53 48 81 EC ?? ?? ?? ?? 4C 89 CE 4D 89 C4 "
     "48 89 D5 48 89 4C 24 78 80 3D ?? ?? ?? ?? 00 75 6A";
 static const char* kSigApplyNode =
-    "41 57 41 56 41 55 41 54 56 57 55 53 48 81 EC 98 00 00 00 48 89 D6 49 89 CE "
+    "41 57 41 56 41 55 41 54 56 57 55 53 48 81 EC ?? ?? ?? ?? 48 89 D6 49 89 CE "
     "4C 8B 62 18 48 8B 59 78 48 2B 59 70 74 46";
 static const char* kSigBoolGet =
-    "41 56 56 57 53 48 83 EC 38 44 89 CB 4C 89 C7 49 89 CE 48 89 54 24 30 "
+    "41 56 56 57 53 48 83 EC ?? 44 89 CB 4C 89 C7 49 89 CE 48 89 54 24 30 "
     "48 8D 71 10 48 89 F1 E8 ?? ?? ?? ??";
 static const char* kSigScalarGet =
-    "41 56 56 57 53 48 83 EC 38 44 89 CF 4C 89 C3 49 89 CE 48 89 54 24 30 "
+    "41 56 56 57 53 48 83 EC ?? 44 89 CF 4C 89 C3 49 89 CE 48 89 54 24 30 "
     "48 8D 71 10 48 89 F1 E8 ?? ?? ?? ??";
 
 static const uintptr_t kBase = 0x140000000u;
@@ -120,7 +120,46 @@ static bool Unique(const scan::PeImage& img, const char* sig, uintptr_t expected
     return n == 1 && hits[0] == expected_va;
 }
 
+// Synthetic check: a wildcard pattern must ignore the stack-frame size while
+// still rejecting a changed instruction. Runs without the game installed.
+static bool MatchAtSelfTest() {
+    const char* shape =
+        "48 89 5C 24 08 48 89 7C 24 10 55 48 8B EC 48 83 EC ??";
+    const uint8_t pro[14] = {0x48,0x89,0x5C,0x24,0x08,0x48,0x89,
+                             0x7C,0x24,0x10,0x55,0x48,0x8B,0xEC};
+    uint8_t buf[24] = {0};
+    memcpy(buf, pro, sizeof(pro));
+    buf[14] = 0x48; buf[15] = 0x83; buf[16] = 0xEC; buf[17] = 0x90;
+
+    scan::PeImage img;
+    img.data = buf;
+    img.base = 0x10000000;
+    img.size = sizeof(buf);
+
+    bool ok = true;
+    ok &= (scan::PatternLength(shape) == 18);
+    ok &= scan::MatchAt(img, img.base, shape);
+    ok &= scan::MatchAt(img, img.base,
+                        "48 89 5C 24 08 48 89 7C 24 10 55 48 8B EC");
+    buf[3] = 0x25;  // corrupt a fixed byte
+    ok &= !scan::MatchAt(img, img.base, shape);
+    return ok;
+}
+
+// AttachLive maps the current process; it must report the real SizeOfImage.
+static bool AttachLiveSelfTest() {
+    scan::PeImage img;
+    if (!scan::AttachLive(&img)) return false;
+    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+    return img.data && img.base == base && img.size > 0x1000 &&
+           scan::MatchAt(img, base, "4D 5A");  // MZ
+}
+
 int main(int argc, char** argv) {
+    Chk(MatchAtSelfTest(),
+        "MatchAt wildcards the frame size and still pins the shape");
+    Chk(AttachLiveSelfTest(), "AttachLive maps the live module");
+
     const wchar_t* path = L"C:\\Program Files (x86)\\Steam\\steamapps\\common\\F1 25\\F1_25.exe";
     wchar_t wbuf[1024];
     if (argc > 1) {
@@ -131,7 +170,7 @@ int main(int argc, char** argv) {
     scan::PeImage img;
     if (!scan::LoadFile(path, &img)) {
         printf("SKIP: cannot load the game image (not installed here)\n");
-        return 0;  // absent game is not a failure
+        return g_fail ? 1 : 0;  // absent game is not a failure
     }
     printf("image: %zu bytes, base %#llx, timestamp %#x\n",
            img.size, (unsigned long long)img.base, img.timestamp);
