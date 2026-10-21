@@ -54,7 +54,8 @@ roughly double the frame-time average, so it is not used):
 | Stock Ultra High, all RT on, TAA only | 46.4 | 48.1 | 39.3 |
 | **v0.2.5** (FSR 3 auto + tuned delta + `rt_ao`/`rt_ddgi` off) | **81.5** | **88.5** | **72.0** |
 
-That is about **+76%**. Most of it comes from the upscaler finally engaging (a
+On-screen (Frame Gen on) that's **97 -> 177 FPS (+82%)**; the frame-time (rendered)
+figure is 46.4 -> 81.5 (+76%). Most of it comes from the upscaler finally engaging (a
 prerequisite fix in v0.2.5 — the engine was silently falling back to TAA); the tuned
 raster/RT delta adds the rest. Numbers are from a single machine and will vary.
 
