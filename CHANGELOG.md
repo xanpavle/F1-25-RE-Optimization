@@ -5,6 +5,36 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-10-21
+
+**The auto-selected upscaler now actually applies — the single biggest FPS lever.**
+
+### Fixed
+
+- **Upscaler selection took effect only for TAA.** `ApplyUpscaler` wrote
+  `fsr3="true"`, but the engine stores FSR 3 as a number (`fsr3="0"/"1"`). The invalid
+  value made the engine reject the whole `<antialiasing>` element and silently fall
+  back to TAA, so `[upscaler] mode=auto` never enabled FSR 3 / DLSS / XeSS. It now
+  writes `fsr3="1"` and also sets `cas="1"`, which the engine requires before it will
+  engage FSR 3.
+- Measured on an AMD RX 7800 XT at 1440p (Austria, wet, 20 cars, frame-time stats
+  from the game's own benchmark CSV): stock Ultra **~46 FPS** → with FSR 3 alone
+  ~66 FPS → with the full mod **~82 FPS** (+~76%), median ~89 FPS.
+
+### Changed
+
+- **`enforce_mode = cheaper` is now the default** (was `target`). It only ever
+  removes work and never raises the numeric shadow/fog settings above the in-game
+  preset, which measured slightly faster than `target`. `target` is unchanged and
+  still available.
+- **Boolean attributes are pinned in every mode**, not just `target`. The table
+  already encodes the intended look (rain / grass / volumetric fog stay on; god rays,
+  lens streak, motion blur v2 stay off), so `cheaper` no longer risks dropping those
+  visible effects to a lower preset.
+- **`rt_ao` and `rt_ddgi` are switched off** in the profile delta. Both are
+  full-screen ray-traced passes that cost far more than they show (~+10% measured);
+  RT shadows and reflections stay on.
+
 ## [0.2.0] - 2026-10-20
 
 **The tuned delta applies in-engine, with self-healing addresses and user-tunable enforcement.**

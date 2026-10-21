@@ -87,6 +87,22 @@ instruction is disturbed, and `eax == 0` means `true`. This is used instead of a
 detour because the parser's prologue contains RIP-relative code and cannot be
 relocated by the simple hook engine.
 
+### Upscaler selection: the value type matters
+
+`<antialiasing>` mixes types. `taa`, `dlss` and `xess` are booleans, but the engine
+stores FSR 3 as a **number** (`fsr3="0"/"1"`). Writing `fsr3="true"` makes the engine
+reject the whole element and fall back to TAA, so the auto-selected backend silently
+never engaged. The profile writes `fsr3="1"` and also sets `cas="1"`, which the engine
+checks before it will use FSR 3.
+
+### Enforcement modes
+
+`enforce_mode = target` substitutes the tuned integer unconditionally.
+`enforce_mode = cheaper` uses it as a ceiling (`min(preset, tuned)`), so it only ever
+removes work. Boolean pinning is independent of the mode: the table above already
+encodes the intended look (rain / grass / fog on; god rays / lens streak / motion blur
+off), so no mode silently drops a visible effect to a lower preset.
+
 ### Detour engine
 
 `src/hook.cpp` writes a 14-byte absolute jump (`FF 25 00000000 <ptr64>`) because an

@@ -41,7 +41,7 @@ int       g_enfov_count = 0;
 
 enum EnfMode { kEnfOff = 0, kEnfCheaper, kEnfTarget };
 
-EnfMode   g_enf_mode        = kEnfTarget;
+EnfMode   g_enf_mode        = kEnfCheaper;
 bool      g_enforce_enabled = true;
 bool      g_enforce_bools   = true;
 bool      g_log_all         = false;

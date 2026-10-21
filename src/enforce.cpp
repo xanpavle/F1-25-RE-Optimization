@@ -588,9 +588,12 @@ void Init() {
         } else {
             Note("enforce: settings parser signature mismatch - skipped (game updated?)");
         }
-        // Bool attributes are only raised in `target` mode. `cheaper` must never
-        // turn an effect on that the user's preset deliberately disabled.
-        if (tune::EnforceTarget() && tune::WantEnforceBools()) PatchBoolSites();
+        // Bool attributes are pinned in every enforce mode. The table already
+        // encodes the intended look (rain / grass / volumetric fog stay ON,
+        // god rays / lens streak / motion blur stay OFF), so this never
+        // silently drops an effect to a lower preset - it just makes the
+        // mod's look independent of which numeric mode is active.
+        if (tune::WantEnforceBools()) PatchBoolSites();
     }
 
     if (tune::WantGuard()) {

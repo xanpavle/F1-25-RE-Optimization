@@ -4,7 +4,7 @@ A runtime renderer optimisation for **F1 25** (EGO engine, Codemasters / EA), bu
 by reverse-engineering the shipped executable. It makes the renderer do **less work
 for the same look** — no `F1_25.exe` bytes are patched on disk.
 
-**v0.2.0** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
+**v0.2.1** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
 
 Built and tested on a single machine, offline, single-player.
 
@@ -44,24 +44,39 @@ Reference system:
 | Display | 2560×1440 @ 165 Hz, Windows 10 |
 | In-game | FSR 3 Quality, Frame Generation ON, Ray Tracing ON |
 
-Benchmark: **F1 25 built-in benchmark, Austria, heavy rain, 20 cars, 1 lap, chase cam.**
+Benchmark: **F1 25 built-in benchmark, Austria, wet, 20 cars, 1 lap, cycle cam**, run
+from the game's own `-benchmark <file>` mode so the two runs are identical apart from
+the mod. FPS below is derived from **frame times** (the on-screen "Average FPS" is
+roughly double the frame-time average, so it is not used):
 
-| Run | File/preset | avg FPS |
-|---|---|---|
-| Ultra-class settings actually loaded | Ultra-class `hardware_settings_config.xml` | **~138** |
-| Game stuck on Low (what the engine exports on this machine) | Low preset | **~98** |
+| Run | avg FPS | median | 1% low |
+|---|---|---|---|
+| Stock Ultra High, all RT on, TAA only | 46.4 | 48.1 | 39.3 |
+| **v0.2.1** (FSR 3 auto + tuned delta + `rt_ao`/`rt_ddgi` off) | **81.5** | **88.5** | **72.0** |
 
-> Those two runs bracket the problem: the engine was exporting a **Low** preset and
-> silently ignoring the tuned file, so the "optimised" run was *lower quality and lower
-> FPS* than a stock Ultra run. v0.2.0 fixes that by enforcing the tuned values at the
-> engine's settings-parser call sites (see below), which restores the Ultra-class look
-> while keeping the tuned (cheaper) shadow, fog and crowd values.
+That is about **+76%**. Most of it comes from the upscaler finally engaging (a
+prerequisite fix in v0.2.1 — the engine was silently falling back to TAA); the tuned
+raster/RT delta adds the rest. Numbers are from a single machine and will vary.
+
+> **Still Image Quality first?** The default that produced the table above is
+> `enforce_mode = cheaper` (only ever removes work) with `[upscaler] mode=auto`. To
+> keep the exact Ultra High look and give up the upscaler, set `mode = keep` or
+> `mode = taa` in `f125_tune.ini`.
 >
-> The displayed numbers include **Frame Generation**. Use the v0.2.0 benchmark on your
-> own machine with `benchmark\Benchmark_*.xml` and compare like-for-like; numbers are
-> from a single machine and will vary.
+> The displayed benchmark numbers include **Frame Generation**; compare like-for-like
+> with `benchmark\Benchmark_*.xml` on your own machine.
 
 ---
+
+## What changed in v0.2.1
+
+The headline fix: **the auto-selected upscaler now actually applies.** v0.2.0 wrote
+`fsr3="true"`, but the engine stores FSR 3 as a number, so it rejected the element and
+fell back to TAA — the biggest FPS lever was silently off. v0.2.1 writes the correct
+value (and the `cas="1"` the engine needs to engage FSR 3). It also switches off the two
+most expensive, least visible ray-traced passes (`rt_ao`, `rt_ddgi`), defaults
+`enforce_mode` to `cheaper`, and pins the boolean effects in every mode so `cheaper`
+can no longer drop rain/grass to a lower preset.
 
 ## What changed in v0.2.0
 

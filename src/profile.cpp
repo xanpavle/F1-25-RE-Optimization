@@ -3,11 +3,15 @@
 //
 // Deliberately NOT touched:
 //   * mirrors.*        - user asked to leave mirror resolution/cadence alone
-//   * rt_* / RayTracing - keeps the Ultra look; RT is the next dial if wanted
+//   * rt_reflections / rt_shadows - the visible part of RT stays on
 //   * weather rain*    - only matters when it rains, and it is visible then
 //   * aa_quality       - the quality level stays whatever you picked in-game;
-//                        only the backend booleans in <antialiasing> are
+//                        only the backend selectors in <antialiasing> are
 //                        switched, and only when [upscaler] asks for it.
+//
+// rt_ao / rt_ddgi are switched off: both are full-screen ray-traced passes that
+// cost far more than they show (measured +10% on the RX 7800 XT at 1440p, with
+// no visible change once the reflections/shadows stay on).
 #include "profile.h"
 #include <string.h>
 
@@ -53,6 +57,10 @@ const Ov kOv[] = {
 
     // --- clouds (planar reflections left alone per request) ---
     {"weather_effects", "proceduralCloudRTScale", "2.0"},
+
+    // --- ray-traced AO / DDGI: expensive full-screen passes, low visual impact ---
+    {"rt_ao", "enabled", "false"},
+    {"rt_ddgi", "enabled", "false"},
 
     // --- ground cover / misc ---
     {"ground_cover", "drawDistance", "80.0"},
@@ -101,16 +109,21 @@ void ReplaceAttr(char* line, size_t cap, const char* attr, const char* val) {
 }
 
 // Switch the <antialiasing .../> element to the requested backend.
+// NOTE: taa/dlss/xess are booleans in the config, but fsr3 is written as a
+// number ("0"/"1"). Writing "true" for fsr3 makes the engine reject the whole
+// element and silently fall back to TAA, which is why the auto-selected FSR 3
+// never used to take effect.
 void ApplyUpscaler(char* line, size_t cap, Upscaler up) {
     const char* taa  = "false";
     const char* dlss = "false";
-    const char* fsr  = "false";
+    const char* fsr  = "0";
     const char* xess = "false";
+    const char* cas  = nullptr;  // only written when the backend needs it
 
     switch (up) {
         case Upscaler::Taa:  taa  = "true"; break;
         case Upscaler::Dlss: dlss = "true"; break;
-        case Upscaler::Fsr3: fsr  = "true"; break;
+        case Upscaler::Fsr3: fsr  = "1"; cas = "1"; break;
         case Upscaler::Xess: xess = "true"; break;
         case Upscaler::Off:  break;          // all false
         case Upscaler::Keep: return;         // caller filtered this already
@@ -120,6 +133,7 @@ void ApplyUpscaler(char* line, size_t cap, Upscaler up) {
     ReplaceAttr(line, cap, "dlss", dlss);
     ReplaceAttr(line, cap, "fsr3", fsr);
     ReplaceAttr(line, cap, "xess", xess);
+    if (cas) ReplaceAttr(line, cap, "cas", cas);
 }
 
 // Read the element name from an element-start line. Returns 0 if not one.

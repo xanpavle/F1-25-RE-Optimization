@@ -7,6 +7,10 @@
 	<ssao algorithm="3" />
 	<ssrt quality="4" />
 	<postprocess godRays="true" lensStreak="true" motionBlurV2="true" />
+	<rt_ao enabled="true" />
+	<rt_ddgi enabled="true" />
+	<rt_shadows enabled="true" />
+	<rt_reflections enabled="true" />
 	<particles high="true" />
 	<crowd billboardDistance="6000" />
 	<ground_cover drawDistance="120.0" />
