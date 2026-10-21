@@ -152,7 +152,7 @@ a second.
 Open `f125_tune.log` in the game folder. A healthy v0.2.0 launch looks like:
 
 ```
-[mod] F1 25 RE-Optimization v0.2.1
+[mod] F1 25 RE-Optimization v0.2.5
 [mod] session: exe=...\F1_25.exe (408063872 bytes)
 [mod] GPU: AMD Radeon RX 7800 XT (AMD 7000-series)
 [mod] upscaler: mode=auto -> FSR 3

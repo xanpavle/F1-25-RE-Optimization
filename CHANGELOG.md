@@ -5,7 +5,7 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
-## [0.2.1] - 2026-10-21
+## [0.2.5] - 2026-10-21
 
 **The auto-selected upscaler now actually applies — the single biggest FPS lever.**
 

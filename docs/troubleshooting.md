@@ -10,7 +10,7 @@ It is **rewritten on every launch**, so it always describes the current session.
 A healthy launch is short and looks like this:
 
 ```
-[mod] F1 25 RE-Optimization v0.2.1
+[mod] F1 25 RE-Optimization v0.2.5
 [mod] session: exe=...\F1_25.exe (408063872 bytes)
 [mod] session: ini=...\f125_tune.ini
 [mod] profile: saved stock backup hardware_settings_config.xml.untuned
@@ -33,7 +33,7 @@ Find your line below.
 
 | Line | Meaning | What to do |
 |---|---|---|
-| `[mod] F1 25 RE-Optimization v0.2.1` | The DLL loaded with the game. | Good — the proxy is working. |
+| `[mod] F1 25 RE-Optimization v0.2.5` | The DLL loaded with the game. | Good — the proxy is working. |
 | `[mod] session: exe=… / ini=…` | Which executable and ini the mod actually loaded. | Check both paths if you have several game copies. |
 | `[mod] hooks installed OK` | Both engine accessors were verified and patched. | Good. |
 | `[mod] enforce: int parser at the known RVA (prologue verified)` | Same game build as the mod was derived from; the fast path was used. | Good. |

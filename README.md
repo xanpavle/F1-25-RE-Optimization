@@ -4,7 +4,7 @@ A runtime renderer optimisation for **F1 25** (EGO engine, Codemasters / EA), bu
 by reverse-engineering the shipped executable. It makes the renderer do **less work
 for the same look** — no `F1_25.exe` bytes are patched on disk.
 
-**v0.2.1** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
+**v0.2.5** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
 
 Built and tested on a single machine, offline, single-player.
 
@@ -52,10 +52,10 @@ roughly double the frame-time average, so it is not used):
 | Run | avg FPS | median | 1% low |
 |---|---|---|---|
 | Stock Ultra High, all RT on, TAA only | 46.4 | 48.1 | 39.3 |
-| **v0.2.1** (FSR 3 auto + tuned delta + `rt_ao`/`rt_ddgi` off) | **81.5** | **88.5** | **72.0** |
+| **v0.2.5** (FSR 3 auto + tuned delta + `rt_ao`/`rt_ddgi` off) | **81.5** | **88.5** | **72.0** |
 
 That is about **+76%**. Most of it comes from the upscaler finally engaging (a
-prerequisite fix in v0.2.1 — the engine was silently falling back to TAA); the tuned
+prerequisite fix in v0.2.5 — the engine was silently falling back to TAA); the tuned
 raster/RT delta adds the rest. Numbers are from a single machine and will vary.
 
 > **Still Image Quality first?** The default that produced the table above is
@@ -68,11 +68,11 @@ raster/RT delta adds the rest. Numbers are from a single machine and will vary.
 
 ---
 
-## What changed in v0.2.1
+## What changed in v0.2.5
 
 The headline fix: **the auto-selected upscaler now actually applies.** v0.2.0 wrote
 `fsr3="true"`, but the engine stores FSR 3 as a number, so it rejected the element and
-fell back to TAA — the biggest FPS lever was silently off. v0.2.1 writes the correct
+fell back to TAA — the biggest FPS lever was silently off. v0.2.5 writes the correct
 value (and the `cas="1"` the engine needs to engage FSR 3). It also switches off the two
 most expensive, least visible ray-traced passes (`rt_ao`, `rt_ddgi`), defaults
 `enforce_mode` to `cheaper`, and pins the boolean effects in every mode so `cheaper`
