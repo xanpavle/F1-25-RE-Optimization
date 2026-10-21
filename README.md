@@ -46,13 +46,13 @@ Reference system:
 
 Benchmark: **F1 25 built-in benchmark, Austria, wet, 20 cars, 1 lap, cycle cam**, run
 from the game's own `-benchmark <file>` mode so the two runs are identical apart from
-the mod. FPS below is derived from **frame times** (the on-screen "Average FPS" is
-roughly double the frame-time average, so it is not used):
+the mod. **avg FPS is the on-screen number** (Frame Gen on); median and 1% low are
+frame-time (rendered) figures:
 
 | Run | avg FPS | median | 1% low |
 |---|---|---|---|
-| Stock Ultra High, all RT on, TAA only | 46.4 | 48.1 | 39.3 |
-| **v0.2.5** (FSR 3 auto + tuned delta + `rt_ao`/`rt_ddgi` off) | **81.5** | **88.5** | **72.0** |
+| Stock Ultra High, all RT on, TAA only | 97 | 48.1 | 39.3 |
+| **v0.2.5** (FSR 3 auto + tuned delta + `rt_ao`/`rt_ddgi` off) | **177** | **88.5** | **72.0** |
 
 On-screen (Frame Gen on) that's **97 -> 177 FPS (+82%)**; the frame-time (rendered)
 figure is 46.4 -> 81.5 (+76%). Most of it comes from the upscaler finally engaging (a
