@@ -17,9 +17,9 @@ Versioning: [Semantic Versioning](https://semver.org/).
   back to TAA, so `[upscaler] mode=auto` never enabled FSR 3 / DLSS / XeSS. It now
   writes `fsr3="1"` and also sets `cas="1"`, which the engine requires before it will
   engage FSR 3.
-- Measured on an AMD RX 7800 XT at 1440p (Austria, wet, 20 cars, frame-time stats
-  from the game's own benchmark CSV): stock Ultra **~46 FPS** → with FSR 3 alone
-  ~66 FPS → with the full mod **~82 FPS** (+~76%), median ~89 FPS.
+- Measured on an AMD RX 7800 XT at 1440p (Austria, wet, 20 cars): on-screen
+  (Frame Gen on) **97 → 177 FPS (+82%)**; frame-time (rendered) ~46 → ~82 FPS
+  (+~76%), median ~89 FPS. With FSR 3 alone ~66 FPS rendered.
 
 ### Changed
 
