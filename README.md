@@ -458,4 +458,4 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
 MIT — see [LICENSE](LICENSE). Provided "as is", without warranty; see the disclaimer
 above.
 
-Version **0.2.0** — changes in [CHANGELOG.md](CHANGELOG.md).
+Version **0.2.5** — changes in [CHANGELOG.md](CHANGELOG.md).
