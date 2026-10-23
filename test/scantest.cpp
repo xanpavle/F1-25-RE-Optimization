@@ -26,6 +26,9 @@ static const char* kSigApply =
 static const char* kSigApplyNode =
     "41 57 41 56 41 55 41 54 56 57 55 53 48 81 EC ?? ?? ?? ?? 48 89 D6 49 89 CE "
     "4C 8B 62 18 48 8B 59 78 48 2B 59 70 74 46";
+static const char* kSigParseFloat =
+    "45 33 C0 E9 ?? ?? ?? ?? 48 89 5C 24 08 57 48 83 EC ?? 48 8B FA 48 8B D9 "
+    "48 85 C9";
 static const char* kSigBoolGet =
     "41 56 56 57 53 48 83 EC ?? 44 89 CB 4C 89 C7 49 89 CE 48 89 54 24 30 "
     "48 8D 71 10 48 89 F1 E8 ?? ?? ?? ??";
@@ -36,11 +39,14 @@ static const char* kSigScalarGet =
 static const uintptr_t kBase = 0x140000000u;
 static const uintptr_t kRvaParseInt = 0x534dcd8u;
 static const uintptr_t kRvaParseBool = 0x534d918u;
+static const uintptr_t kRvaParseFloatThunk = 0x5343ff4u;
+static const uintptr_t kRvaParseFloat = 0x5343ffcu;
 static const uintptr_t kRvaApply = 0x40217f0u;
 static const uintptr_t kRvaApplyNode = 0x40226c0u;
 
 struct IntEnf { uintptr_t ret_rva; const char* name; const char* key; };
 struct BoolEnf { uintptr_t call_rva; const char* name; const char* key; };
+struct FloatEnf { uintptr_t ret_rva; const char* name; const char* key; };
 
 static const IntEnf kInt[] = {
     {0x3dc3c7b, "worldShadowMapSize", "worldShadowMapSize"},
@@ -75,6 +81,10 @@ static const BoolEnf kBool[] = {
     {0x3ce438c, "groundCover.meshes", "meshes"},
     {0x3ca4f38, "volumetricFog", "volumetricFog"},
 };
+static const FloatEnf kFloat[] = {
+    {0x3ce448b, "groundCover.drawDistance", "drawDistance"},
+    {0x15b2ef,  "proceduralCloudRTScale",   "proceduralCloudRTScale"},
+};
 
 static const char* kIntNames[] = {
     "worldShadowMapSize","nightShadowMapSize","spotShadowSampling",
@@ -85,6 +95,8 @@ static const char* kBoolNames[] = {
     "skyShadowLowLod","skyShadowMap32Bits","crowdInShadows","godRays","lensStreak",
     "motionBlurV2","nightShadowCharacterCast","rainSplashes","rainBeads","rainHigh",
     "trackHeatHaze","rainSheets","enabled","grassFlattening","meshes","volumetricFog"};
+static const char* kFloatNames[] = {
+    "drawDistance","proceduralCloudRTScale"};
 
 static int g_fail = 0;
 static void Chk(int cond, const char* what) {
@@ -112,6 +124,11 @@ static bool BoolSiteValid(const scan::PeImage& img, uintptr_t call_rva, uintptr_
     int32_t rel = 0;
     memcpy(&rel, p + 1, 4);
     return (uintptr_t)(img.base + call_rva + 5 + (intptr_t)rel) == callee;
+}
+
+// Float call sites target the thunk, not the core that the mod detours.
+static bool FloatSiteValid(const scan::PeImage& img, uintptr_t ret_rva, uintptr_t callee) {
+    return ret_rva >= 5 && IntSiteValid(img, ret_rva, callee);
 }
 
 static bool Unique(const scan::PeImage& img, const char* sig, uintptr_t expected_va) {
@@ -190,26 +207,42 @@ int main(int argc, char** argv) {
 
     const int nInt = (int)(sizeof(kIntNames) / sizeof(*kIntNames));
     const int nBool = (int)(sizeof(kBoolNames) / sizeof(*kBoolNames));
-    int si = 0, sb = 0, nci = 0, ncb = 0;
+    const int nFloat = (int)(sizeof(kFloatNames) / sizeof(*kFloatNames));
+    int si = 0, sb = 0, sf = 0, nci = 0, ncb = 0, ncf = 0;
     const uintptr_t parseInt = scan::ResolveParser(
         img, idx, kSigParseInt, kIntNames, nInt, img.base + kRvaParseInt, &si, &nci);
     const uintptr_t parseBool = scan::ResolveParser(
         img, idx, kSigParseBool, kBoolNames, nBool, img.base + kRvaParseBool, &sb, &ncb);
+    const uintptr_t parseFloat = scan::ResolveParser(
+        img, idx, kSigParseFloat, kFloatNames, nFloat,
+        img.base + kRvaParseFloatThunk, &sf, &ncf);
     printf("parseInt : %#llx (score %d/%d, %d candidates)\n",
            (unsigned long long)(parseInt - img.base), si, nInt, nci);
     printf("parseBool: %#llx (score %d/%d, %d candidates)\n",
            (unsigned long long)(parseBool - img.base), sb, nBool, ncb);
 
+    printf("parseFloat: %#llx (score %d/%d, %d candidates)\n",
+           (unsigned long long)(parseFloat - img.base), sf, nFloat, ncf);
+
     Chk(parseInt == img.base + kRvaParseInt, "int parser resolved by signature");
     Chk(parseBool == img.base + kRvaParseBool, "bool parser resolved by signature");
+    Chk(parseFloat == img.base + kRvaParseFloatThunk,
+        "float parser thunk resolved by signature");
+    {
+        int32_t rel = 0;
+        memcpy(&rel, Ptr(img, kRvaParseFloatThunk + 4), 4);
+        Chk(parseFloat && (parseFloat + 8 + (intptr_t)rel) == img.base + kRvaParseFloat,
+            "float thunk points at the known core entry");
+    }
     Chk(Unique(img, kSigApply, img.base + kRvaApply), "apply signature unique at known RVA");
     Chk(Unique(img, kSigApplyNode, img.base + kRvaApplyNode), "applyNode signature unique at known RVA");
     Chk(Unique(img, kSigBoolGet, img.base + 0x3a43b90), "bool getter signature unique");
     Chk(Unique(img, kSigScalarGet, img.base + 0x3a43240), "scalar getter signature unique");
 
-    int okInt = 0, discInt = 0, okBool = 0, discBool = 0;
+    int okInt = 0, discInt = 0, okBool = 0, discBool = 0, okFloat = 0, discFloat = 0;
     const int nIntTab = (int)(sizeof(kInt) / sizeof(*kInt));
     const int nBoolTab = (int)(sizeof(kBool) / sizeof(*kBool));
+    const int nFloatTab = (int)(sizeof(kFloat) / sizeof(*kFloat));
     for (int k = 0; k < nIntTab; ++k) {
         if (IntSiteValid(img, kInt[k].ret_rva, parseInt)) ++okInt;
         uintptr_t s[8];
@@ -226,14 +259,26 @@ int main(int argc, char** argv) {
             if (s[i] == img.base + kBool[k].call_rva + 5) { ++discBool; break; }
         }
     }
+    for (int k = 0; k < nFloatTab; ++k) {
+        if (FloatSiteValid(img, kFloat[k].ret_rva, parseFloat)) ++okFloat;
+        uintptr_t s[8];
+        const int n = scan::FindSites(img, idx, kFloat[k].key, parseFloat, 0x100, false, s, 8);
+        for (int i = 0; i < n; ++i) {
+            if (s[i] == img.base + kFloat[k].ret_rva) { ++discFloat; break; }
+        }
+    }
     printf("int sites : %d/%d validated, %d/%d rediscovered by name\n",
            okInt, nIntTab, discInt, nIntTab);
     printf("bool sites: %d/%d validated, %d/%d rediscovered by name\n",
            okBool, nBoolTab, discBool, nBoolTab);
+    printf("float sites: %d/%d validated, %d/%d rediscovered by name\n",
+           okFloat, nFloatTab, discFloat, nFloatTab);
     Chk(okInt == nIntTab, "all int table sites validate");
     Chk(okBool == nBoolTab, "all bool table sites validate");
+    Chk(okFloat == nFloatTab, "all float table sites validate");
     Chk(discInt == nIntTab, "all int sites rediscovered by name");
     Chk(discBool == nBoolTab, "all bool sites rediscovered by name");
+    Chk(discFloat == nFloatTab, "all float sites rediscovered by name");
 
     scan::LeaFree(&idx);
     scan::Free(&img);

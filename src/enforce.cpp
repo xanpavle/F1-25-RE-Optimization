@@ -8,6 +8,8 @@
 #include <string.h>
 
 namespace enforce {
+void DumpPreset(void* root);
+void TryDumpPreset(void);
 namespace {
 
 // --- F1_25.exe (image base 0x140000000, no ASLR) -----------------------------
@@ -16,6 +18,15 @@ static const uintptr_t kRvaParseInt  = 0x534dcd8u;
 // FUN_14534d918: bool attribute check; returns 0 when the string is "true"
 // (the callers turn that into a bool with `test eax,eax; sete`).
 static const uintptr_t kRvaParseBool = 0x534d918u;
+
+// FUN_145343ff4: two-argument thunk (`xor r8d,r8d; jmp`) into the real float
+// parser at FUN_145343ffc, which has the MSVC `_strtof_s` shape:
+//     int f(float* out, const char* value, char** end)
+// Every float attribute site does `lea rcx,[out]; mov rdx,valueString; call
+// thunk`, so call sites are validated against the *thunk* while the detour is
+// installed on the core entry (the thunk is a branch and cannot be relocated).
+static const uintptr_t kRvaParseFloatThunk = 0x5343ff4u;
+static const uintptr_t kRvaParseFloat      = 0x5343ffcu;
 
 // hardwareSettings::Options::apply / ::applyNode (verified via xrefs on the
 // "[hardwareSettings::Options::apply]" / "[...applyNode]" log strings).
@@ -40,6 +51,11 @@ static const char* kPatApplyNode = kPatApply;  // same prologue shape
 static const int   kLenApplyNode = 19;
 static const char* kPatParseBool =
     "48 83 EC 28 83 3D ?? ?? ?? ?? 00 75 2D 48 85 C9";  // 16 bytes
+static const char* kPatParseFloatThunk =
+    "45 33 C0 E9 ?? ?? ?? ?? 48 89 5C 24 08 57";        // 13 bytes
+static const char* kPatParseFloat =
+    "48 89 5C 24 08 57 48 83 EC ?? 48 8B FA 48 8B D9";  // 16 bytes
+static const int   kLenParseFloat = 16;
 
 // Signatures used to re-derive the addresses on an updated game build. See
 // src/scan.cpp. Frame sizes are wildcarded so a compiler change does not defeat
@@ -52,6 +68,11 @@ static const char* kSigParseInt =
 static const char* kSigParseBool =
     "48 83 EC 28 83 3D ?? ?? ?? ?? 00 75 2D 48 85 C9 75 1A E8 ?? ?? ?? ?? "
     "C7 00 16 00 00 00 E8 ?? ?? ?? ?? B8 FF FF FF 7F 48 83 C4 28 C3";
+// Starts at the thunk, so the scanner can derive both the call-site target
+// (the thunk) and the hook target (thunk + 8 + rel32 jmp).
+static const char* kSigParseFloat =
+    "45 33 C0 E9 ?? ?? ?? ?? 48 89 5C 24 08 57 48 83 EC ?? 48 8B FA 48 8B D9 "
+    "48 85 C9";
 static const char* kSigApply =
     "41 57 41 56 41 55 41 54 56 57 55 53 48 81 EC ?? ?? ?? ?? 4C 89 CE 4D 89 C4 "
     "48 89 D5 48 89 4C 24 78 80 3D ?? ?? ?? ?? 00 75 6A";
@@ -126,8 +147,31 @@ BoolEnf g_bool[] = {
 };
 const int kBoolCount = (int)(sizeof(g_bool) / sizeof(g_bool[0]));
 
+// Float attributes use the same return-address substitution, but the parser
+// writes the value through an out pointer and returns an errno_t. Lower is
+// cheaper for both entries, so `cheaper` mode keeps min(preset, tuned).
+struct FloatEnf {
+    uintptr_t     ret_rva;     // return address of `call <float thunk>`
+    float         value;
+    const char*   name;
+    const char*   key;
+    int           disabled;
+    volatile long logged;
+};
+FloatEnf g_float[] = {
+    // far grass only (the ground-cover node is rewritten by the preset clamp)
+    {0x3ce448b, 80.0f, "groundCover.drawDistance", "drawDistance",       0, 0},
+    // ray-traced clouds: half the RT resolution (soft, barely visible)
+    {0x15b2ef,  2.0f,  "proceduralCloudRTScale",   "proceduralCloudRTScale", 0, 0},
+};
+const int kFloatCount = (int)(sizeof(g_float) / sizeof(g_float[0]));
+
 typedef int (*ParseIntFn)(const char*, int, int);
 ParseIntFn g_parseTramp = nullptr;
+
+// int f(float* out, const char* value, char** end)
+typedef int (*ParseFloatFn)(float*, const char*, char**);
+ParseFloatFn g_parseFloatTramp = nullptr;
 
 volatile long g_dirty = 0;
 volatile long g_stop  = 0;
@@ -196,6 +240,18 @@ bool BoolSiteValid(uintptr_t call_rva, uintptr_t parseBool) {
     int32_t rel = 0;
     memcpy(&rel, c + 1, 4);
     return (uintptr_t)(call_va + 5 + (intptr_t)rel) == parseBool;
+}
+
+// Same shape as the int sites, but the call targets the float-parser thunk.
+bool FloatSiteValid(uintptr_t ret_rva, uintptr_t parseFloatThunk) {
+    if (ret_rva < 5) return false;
+    const uintptr_t call_va = g_base + ret_rva - 5;
+    if (!Readable((const void*)call_va, 5)) return false;
+    const uint8_t* c = (const uint8_t*)call_va;
+    if (c[0] != 0xE8) return false;
+    int32_t rel = 0;
+    memcpy(&rel, c + 1, 4);
+    return (uintptr_t)(call_va + 5 + (intptr_t)rel) == parseFloatThunk;
 }
 
 // Resolves the int parser: fast path is the known RVA with a matching prologue;
@@ -267,8 +323,61 @@ uintptr_t ResolveBoolParser() {
     return va;
 }
 
+// Resolves the float parser. `*thunk_out` receives the address the engine
+// actually calls (used to validate call sites); the return value is the core
+// entry that gets detoured.
+uintptr_t ResolveFloatParser(uintptr_t* thunk_out) {
+    *thunk_out = 0;
+    if (!tune::ForceScan() &&
+        MatchPrologue(g_base + kRvaParseFloatThunk, kPatParseFloatThunk) &&
+        MatchPrologue(g_base + kRvaParseFloat, kPatParseFloat)) {
+        Note("enforce: float parser at the known RVA (prologue verified)");
+        *thunk_out = g_base + kRvaParseFloatThunk;
+        return g_base + kRvaParseFloat;
+    }
+    EnsureImage();
+    if (!g_img_ok) {
+        Note("enforce: live image mapping failed - cannot self-heal the float parser");
+        return 0;
+    }
+    EnsureIndex();
+    if (!g_idx_ok) {
+        Note("enforce: LEA index build failed - cannot self-heal the float parser");
+        return 0;
+    }
+
+    const char* keys[8];
+    int nk = 0;
+    for (int i = 0; i < kFloatCount && nk < 8; ++i) keys[nk++] = g_float[i].key;
+    int score = 0, cands = 0;
+    const uintptr_t thunk = scan::ResolveParser(g_img, g_idx, kSigParseFloat, keys, nk,
+                                                g_base + kRvaParseFloatThunk, &score,
+                                                &cands);
+    if (!thunk) {
+        Note("enforce: float parser not found (game build unsupported)");
+        return 0;
+    }
+    int32_t rel = 0;
+    memcpy(&rel, (const void*)(thunk + 4), sizeof(rel));
+    const uintptr_t core = thunk + 8 + (intptr_t)rel;
+    if (!MatchPrologue(core, kPatParseFloat)) {
+        Note("enforce: float parser signature matched but the core prologue did not");
+        return 0;
+    }
+    *thunk_out = thunk;
+    char line[224];
+    _snprintf(line, sizeof(line),
+              "enforce: float parser re-derived by signature (score %d/%d, %d candidates, "
+              "thunk %#llx -> core %#llx)",
+              score, nk, cands, (unsigned long long)thunk, (unsigned long long)core);
+    line[sizeof(line) - 1] = 0;
+    Note(line);
+    return core;
+}
+
 // Re-derives every site that no longer validates against the resolved parser.
-void ResolveSites(uintptr_t parseInt, uintptr_t parseBool) {
+void ResolveSites(uintptr_t parseInt, uintptr_t parseBool,
+                  uintptr_t parseFloatThunk) {
     int table_int = 0, disc_int = 0, miss_int = 0;
     for (int i = 0; i < kEnfCount; ++i) {
         Enf& e = g_enf[i];
@@ -329,12 +438,44 @@ void ResolveSites(uintptr_t parseInt, uintptr_t parseBool) {
         }
     }
 
+    int table_float = 0, disc_float = 0, miss_float = 0;
+    for (int i = 0; i < kFloatCount; ++i) {
+        FloatEnf& f = g_float[i];
+        const uintptr_t hard = f.ret_rva;
+        if (parseFloatThunk && FloatSiteValid(hard, parseFloatThunk)) {
+            f.ret_rva = hard;
+            ++table_float;
+            continue;
+        }
+        if (!parseFloatThunk || !g_idx_ok) {
+            f.ret_rva = 0;
+            ++miss_float;
+            continue;
+        }
+        uintptr_t s[8];
+        const int n = scan::FindSites(g_img, g_idx, f.key, parseFloatThunk, 0x100, false, s, 8);
+        if (n == 1) {
+            f.ret_rva = s[0] - g_base;
+            ++disc_float;
+        } else {
+            f.ret_rva = 0;
+            ++miss_float;
+            char line[192];
+            _snprintf(line, sizeof(line),
+                      "enforce: WARN %s unresolved (%d candidate sites) - skipped", f.name, n);
+            line[sizeof(line) - 1] = 0;
+            Note(line);
+        }
+    }
+
     if (tune::LogReport()) {
-        char line[256];
+        char line[320];
         _snprintf(line, sizeof(line),
                   "report: int sites table=%d discovered=%d missing=%d | "
-                  "bool sites table=%d discovered=%d missing=%d",
-                  table_int, disc_int, miss_int, table_bool, disc_bool, miss_bool);
+                  "bool sites table=%d discovered=%d missing=%d | "
+                  "float sites table=%d discovered=%d missing=%d",
+                  table_int, disc_int, miss_int, table_bool, disc_bool, miss_bool,
+                  table_float, disc_float, miss_float);
         line[sizeof(line) - 1] = 0;
         Note(line);
     }
@@ -355,6 +496,14 @@ void ApplyOverrides() {
         if (tune::LookupEnforce(g_bool[i].name, &v, &d)) {
             if (d) { g_bool[i].disabled = 1; ++disabled; }
             else { g_bool[i].value = (v != 0); ++changed; }
+        }
+    }
+    for (int i = 0; i < kFloatCount; ++i) {
+        float v = 0.0f;
+        int d = 0;
+        if (tune::LookupEnforceFloat(g_float[i].name, &v, &d)) {
+            if (d) { g_float[i].disabled = 1; ++disabled; }
+            else { g_float[i].value = v; ++changed; }
         }
     }
     if (changed || disabled) {
@@ -409,7 +558,58 @@ int DetourParseInt(const char* value, int def, int flags) {
     return orig;
 }
 
+int DetourParseFloat(float* out, const char* value, char** end) {
+    const uintptr_t rva = (uintptr_t)__builtin_return_address(0) - g_base;
+    const int rc = g_parseFloatTramp(out, value, end);
+
+    if (!out) return rc;
+    for (int i = 0; i < kFloatCount; ++i) {
+        if (g_float[i].ret_rva != rva || g_float[i].disabled) continue;
+        const float orig = *out;
+        const float tuned = g_float[i].value;
+        // `cheaper`: the tuned value is a ceiling (lower is cheaper here too).
+        const float val = tune::EnforceTarget() ? tuned
+                                                : ((orig < tuned) ? orig : tuned);
+        if (val != orig) *out = val;
+        if (InterlockedExchange(&g_float[i].logged, 1) == 0) {
+            char line[224];
+            _snprintf(line, sizeof(line),
+                      "enforce: %s -> %g (preset gave %g, mode=%s)", g_float[i].name,
+                      val, orig, tune::EnforceTarget() ? "target" : "cheaper");
+            line[sizeof(line) - 1] = 0;
+            Note(line);
+        }
+        return rc;
+    }
+    if (tune::LogAll() && rva != 0) {
+        static uintptr_t seen[256];
+        static int seen_n = 0;
+        bool dup = false;
+        for (int i = 0; i < seen_n; ++i) {
+            if (seen[i] == rva) { dup = true; break; }
+        }
+        if (!dup && seen_n < 256) {
+            seen[seen_n++] = rva;
+            char line[160];
+            _snprintf(line, sizeof(line), "parse: float site rva %#x -> %g",
+                      (unsigned)rva, *out);
+            line[sizeof(line) - 1] = 0;
+            Note(line);
+        }
+    }
+    return rc;
+}
+
+static volatile long g_dump_done = 0;
+
 DWORD WINAPI Watcher(LPVOID) {
+    // Give the engine time to load settings, then capture a preset dump even if
+    // hardwareSettings::Options::apply ran before our hooks were installed.
+    Sleep(20000);
+    if (!g_dump_done) {
+        TryDumpPreset();
+    }
+
     while (!g_stop) {
         Sleep(500);
         if (InterlockedExchange(&g_dirty, 0)) {
@@ -432,11 +632,186 @@ void*     g_applyTramp     = nullptr;
 void*     g_applyNodeTramp = nullptr;
 uintptr_t g_applyRet       = 0;
 uintptr_t g_applyNodeRet   = 0;
+void*     g_applyRootNode  = nullptr;
+int       g_applyDepth     = 0;
+int       g_inApply        = 0;
+unsigned char g_applyNodeTop = 0;
+}
+
+// Walks a node (and its children) and dumps every attribute as
+// "category:attribute=value" to f125_preset_<preset>.txt. `node` is the root
+// node handed to hardwareSettings::Options::apply (image-base-relative layout:
+// +0x18 name, +0x50/+0x58 attribute array, +0x70/+0x78 child-node array).
+void DumpPreset(void* root) {
+    char dbg[128];
+    _snprintf(dbg, sizeof(dbg), "DumpPreset called root=%p", root);
+    dbg[sizeof(dbg)-1]=0;
+    tune::Note(dbg);
+    if (!root || !Readable(root, 0x80)) {
+        tune::Note("DumpPreset: root null/unreadable");
+        return;
+    }
+
+    // Find a "category" attribute anywhere in the tree; its value becomes the
+    // preset name used in the dump file name.
+    char preset[128] = {0};
+    {
+        // iterative-ish recursive lambda via a helper stack
+        void* stack[64];
+        int sp = 0;
+        stack[sp++] = root;
+        while (sp > 0 && preset[0] == 0) {
+            void* n = stack[--sp];
+            if (!n || !Readable(n, 0x80)) continue;
+            void** s = *(void*** )((char*)n + 0x50);
+            void** e = *(void*** )((char*)n + 0x58);
+            if (Readable(s, 0) && Readable(e, 0) && e >= s &&
+                (size_t)(e - s) < 100000) {
+                for (void** p = s; p < e; ++p) {
+                    if (!Readable(p, sizeof(void*))) break;
+                    void* a = *p;
+                    if (!a || !Readable(a, 0x60)) continue;
+                    const char* an = *(const char**)((char*)a + 0x18);
+                    if (!an || !Readable(an, 1)) continue;
+                    if (strcmp(an, "category") == 0) {
+                        const char* av = *(const char**)((char*)a + 0x50);
+                        if (av && Readable(av, 1)) {
+                            strncpy(preset, av, sizeof(preset) - 1);
+                            preset[sizeof(preset) - 1] = 0;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (preset[0]) break;
+            void** cs = *(void*** )((char*)n + 0x70);
+            void** ce = *(void*** )((char*)n + 0x78);
+            if (Readable(cs, 0) && Readable(ce, 0) && ce >= cs &&
+                (size_t)(ce - cs) < 100000) {
+                for (void** p = cs; p < ce && sp < 63; ++p) {
+                    if (!Readable(p, sizeof(void*))) break;
+                    stack[sp++] = *p;
+                }
+            }
+        }
+    }
+    if (preset[0] == 0) strcpy(preset, "unknown");
+
+    char safe[128] = {0};
+    size_t si = 0;
+    for (const char* c = preset; *c && si + 1 < sizeof(safe); ++c) {
+        if ((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') ||
+            (*c >= '0' && *c <= '9') || *c == '_' || *c == '-') {
+            safe[si++] = *c;
+        } else if (*c == ' ') {
+            safe[si++] = '_';
+        }
+    }
+    safe[si] = 0;
+    if (si == 0) strcpy(safe, "unknown");
+
+    wchar_t wname[128] = {0};
+    MultiByteToWideChar(CP_ACP, 0, safe, -1, wname, 128);
+
+    wchar_t path[MAX_PATH] = {0};
+    _snwprintf(path, MAX_PATH, L"%s\\f125_preset_%s.txt", tune::ExeDir(), wname);
+
+    FILE* f = _wfopen(path, L"w");
+    if (!f) return;
+
+    fprintf(f, "# preset=%s\\n", preset);
+
+    // Dump the whole tree. Use an explicit stack to avoid deep recursion.
+    void* st[256];
+    int sp = 0;
+    st[sp++] = root;
+    while (sp > 0) {
+        void* n = st[--sp];
+        if (!n || !Readable(n, 0x80)) continue;
+
+        const char* nname = *(const char**)((char*)n + 0x18);
+        if (!nname || !Readable(nname, 1)) nname = "node";
+
+        void** s = *(void*** )((char*)n + 0x50);
+        void** e = *(void*** )((char*)n + 0x58);
+        if (Readable(s, 0) && Readable(e, 0) && e >= s &&
+            (size_t)(e - s) < 100000) {
+            for (void** p = s; p < e; ++p) {
+                if (!Readable(p, sizeof(void*))) break;
+                void* a = *p;
+                if (!a || !Readable(a, 0x60)) continue;
+                const char* an = *(const char**)((char*)a + 0x18);
+                const char* av = *(const char**)((char*)a + 0x50);
+                if (!an || !Readable(an, 1)) continue;
+                if (!av || !Readable(av, 1)) av = "";
+                fprintf(f, "%s:%s=%s\\n", nname, an, av);
+            }
+        }
+
+        void** cs = *(void*** )((char*)n + 0x70);
+        void** ce = *(void*** )((char*)n + 0x78);
+        if (Readable(cs, 0) && Readable(ce, 0) && ce >= cs &&
+            (size_t)(ce - cs) < 100000) {
+            for (void** p = cs; p < ce; ++p) {
+                if (!Readable(p, sizeof(void*))) break;
+                if (sp < 255) st[sp++] = *p;
+            }
+        }
+    }
+
+    fclose(f);
+
+    char line[256];
+    _snprintf(line, sizeof(line), "preset dump written: f125_preset_%s.txt", safe);
+    line[sizeof(line) - 1] = 0;
+    tune::Note(line);
+}
+
+void TryDumpPreset(void) {
+    if (g_dump_done) return;
+    void* root = g_applyRootNode;
+    if (!root) {
+        if (Readable((const void*)0x146044700u, sizeof(void*))) {
+            void* cand = *(void**)0x146044700u;
+            char dbg[256];
+            _snprintf(dbg, sizeof(dbg), "global candidate=%p", cand);
+            dbg[sizeof(dbg)-1]=0;
+            tune::Note(dbg);
+            if (cand && Readable(cand, 0x80)) {
+                // log first 8 qwords
+                for (int i = 0; i < 8; ++i) {
+                    void* v = ((void**)cand)[i];
+                    _snprintf(dbg, sizeof(dbg), "  cand[%d]=%p", i, v);
+                    dbg[sizeof(dbg)-1]=0;
+                    tune::Note(dbg);
+                }
+                root = cand;
+            }
+        }
+    }
+    if (root) {
+        DumpPreset(root);
+        InterlockedExchange(&g_dump_done, 1);
+    } else {
+        tune::Note("preset dump: no settings root found");
+    }
 }
 
 // Runs *after* hardwareSettings::Options::apply / applyNode. Debounced: it only
 // flags the settings file as dirty; the watcher thread does the disk work.
 extern "C" void OnPresetApplied(void) { InterlockedExchange(&g_dirty, 1); }
+
+extern "C" void OnApplyPost(void) {
+    OnPresetApplied();
+    DumpPreset(g_applyRootNode);
+}
+
+extern "C" void NoteApplyNodeEntry(void) {
+    tune::Note("ApplyNodeDetour entry");
+}
+extern "C" void NoteApplyEntry(void) {
+    tune::Note("ApplyDetour entry");
+}
 
 // Naked pass-through detours: run the original with its exact stack, then drop
 // into our post-hook and finally jump to the real caller.
@@ -447,6 +822,10 @@ asm(
     ".text\n"
     ".globl ApplyDetour\n"
     "ApplyDetour:\n"
+    "  pushq %rdx\n"
+    "  movl $1, g_inApply(%rip)\n"
+    "  call NoteApplyEntry\n"
+    "  popq %rdx\n"
     "  movq (%rsp), %rax\n"
     "  movq %rax, g_applyRet(%rip)\n"
     "  leaq .LApplyPost(%rip), %rax\n"
@@ -455,6 +834,7 @@ asm(
     ".LApplyPost:\n"
     "  pushq %rax\n"
     "  subq $0x28, %rsp\n"
+    "  movl $0, g_inApply(%rip)\n"
     "  call OnPresetApplied\n"
     "  addq $0x28, %rsp\n"
     "  popq %rax\n"
@@ -462,6 +842,15 @@ asm(
     "  jmp *%rcx\n"
     ".globl ApplyNodeDetour\n"
     "ApplyNodeDetour:\n"
+    "  pushq %rdx\n"
+    "  call NoteApplyNodeEntry\n"
+    "  popq %rdx\n"
+    "  cmpl $0, g_applyDepth(%rip)\n"
+    "  jne .LNodeNotTop\n"
+    "  movq %rdx, g_applyRootNode(%rip)\n"
+    "  movb $1, g_applyNodeTop(%rip)\n"
+    ".LNodeNotTop:\n"
+    "  addl $1, g_applyDepth(%rip)\n"
     "  movq (%rsp), %rax\n"
     "  movq %rax, g_applyNodeRet(%rip)\n"
     "  leaq .LApplyNodePost(%rip), %rax\n"
@@ -470,7 +859,19 @@ asm(
     ".LApplyNodePost:\n"
     "  pushq %rax\n"
     "  subq $0x28, %rsp\n"
+    "  subl $1, g_applyDepth(%rip)\n"
+    "  cmpb $0, g_applyNodeTop(%rip)\n"
+    "  je .LNodePostSkip\n"
+    "  cmpq $0, g_applyRootNode(%rip)\n"
+    "  je .LNodePostSkip\n"
+    "  cmpl $0, g_applyDepth(%rip)\n"
+    "  jne .LNodePostSkip\n"
+    "  movb $0, g_applyNodeTop(%rip)\n"
+    "  call OnApplyPost\n"
+    "  jmp .LNodePostDone\n"
+    ".LNodePostSkip:\n"
     "  call OnPresetApplied\n"
+    ".LNodePostDone:\n"
     "  addq $0x28, %rsp\n"
     "  popq %rax\n"
     "  movq g_applyNodeRet(%rip), %rcx\n"
@@ -573,20 +974,27 @@ void Init() {
 
     const uintptr_t parseInt = tune::WantEnforce() ? ResolveIntParser() : 0;
     const uintptr_t parseBool = tune::WantEnforce() ? ResolveBoolParser() : 0;
+    uintptr_t parseFloatThunk = 0;
+    const uintptr_t parseFloat =
+        tune::WantEnforce() ? ResolveFloatParser(&parseFloatThunk) : 0;
     g_parse_bool_va = parseBool;
 
-    if (tune::WantEnforce() && parseInt) {
-        ResolveSites(parseInt, parseBool);
+    if (tune::WantEnforce() && (parseInt || parseBool || parseFloat)) {
+        ResolveSites(parseInt, parseBool, parseFloatThunk);
         ApplyOverrides();
 
-        void* t = PatchAt(parseInt, kPatParsePatch, kLenParsePatch,
-                          (void*)&DetourParseInt);
-        if (t) {
-            g_parseTramp = (ParseIntFn)t;
-            g_enforce_on = true;
-            Note("enforce: settings parser hooked (tuned values applied in-engine)");
+        if (parseInt) {
+            void* t = PatchAt(parseInt, kPatParsePatch, kLenParsePatch,
+                              (void*)&DetourParseInt);
+            if (t) {
+                g_parseTramp = (ParseIntFn)t;
+                g_enforce_on = true;
+                Note("enforce: settings parser hooked (tuned values applied in-engine)");
+            } else {
+                Note("enforce: settings parser signature mismatch - skipped (game updated?)");
+            }
         } else {
-            Note("enforce: settings parser signature mismatch - skipped (game updated?)");
+            Note("enforce: int parser unavailable - integer values stay at the preset");
         }
         // Bool attributes are pinned in every enforce mode. The table already
         // encodes the intended look (rain / grass / volumetric fog stay ON,
@@ -594,6 +1002,20 @@ void Init() {
         // silently drops an effect to a lower preset - it just makes the
         // mod's look independent of which numeric mode is active.
         if (tune::WantEnforceBools()) PatchBoolSites();
+
+        if (parseFloat) {
+            void* tf = PatchAt(parseFloat, kPatParseFloat, kLenParseFloat,
+                               (void*)&DetourParseFloat);
+            if (tf) {
+                g_parseFloatTramp = (ParseFloatFn)tf;
+                g_enforce_on = true;
+                Note("enforce: float parser hooked (cloud RT scale / grass distance)");
+            } else {
+                Note("enforce: float parser signature mismatch - skipped (game updated?)");
+            }
+        } else {
+            Note("enforce: float parser unavailable - float values stay at the preset");
+        }
     }
 
     if (tune::WantGuard()) {

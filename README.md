@@ -4,7 +4,7 @@ A runtime renderer optimisation for **F1 25** (EGO engine, Codemasters / EA), bu
 by reverse-engineering the shipped executable. It makes the renderer do **less work
 for the same look** — no `F1_25.exe` bytes are patched on disk.
 
-**v0.2.5** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
+**v0.2.6** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
 
 Built and tested on a single machine, offline, single-player.
 
@@ -69,6 +69,26 @@ raster/RT delta adds the rest. Numbers are from a single machine and will vary.
 
 ---
 
+## What changed in v0.2.6
+
+In-engine enforcement now covers the last two **float** settings, using the same
+return-address technique as the integer table:
+
+| Attribute | Tuned value | Why |
+|---|---|---|
+| `weather_effects.proceduralCloudRTScale` | 2.0 | half-resolution ray-traced clouds; soft and barely visible in motion |
+| `ground_cover.drawDistance` | 80.0 m | only the far grass is removed; nearby grass is unchanged |
+
+The engine parses float attributes with a shared `_strtof_s`-shaped parser that
+writes the result through a pointer. The mod detours that parser and replaces the
+value only for the two call sites that belong to those attributes, so every other
+float setting is untouched. `enforce_mode = cheaper` keeps the cheaper of the preset
+and the tuned value; `target` makes the tuned value win. The addresses are validated
+at startup and re-derived by signature + attribute name if the game updates.
+
+`scantest` now validates and re-discovers 12 integer, 17 boolean and 2 float sites
+(31 total).
+
 ## What changed in v0.2.5
 
 The headline fix: **the auto-selected upscaler now actually applies.** v0.2.0 wrote
@@ -86,10 +106,10 @@ v0.1.0 tuned the settings file. v0.2.0 makes those values survive the engine:
 | | v0.1.0 | v0.2.0 |
 |---|---|---|
 | File delta | applied at launch | applied, then restored after a graphics-menu preset change |
-| Preset clamp | could silently overwrite the tuning | 12 integers + 17 boolean sites enforced in-engine, after the clamp |
+| Preset clamp | could silently overwrite the tuning | 12 integer + 17 boolean + 2 float sites enforced in-engine, after the clamp |
 | Game update | detours fail safe; RVAs re-derived by hand | parsers, hooks and sites re-derived by signature + attribute name at launch |
 | User control | fixed table | `[enforce]` per-attribute overrides; `target` / `cheaper` / `off` |
-| Verification | manual | `scantest` re-derives and re-checks all 29 sites offline |
+| Verification | manual | `scantest` re-derives and re-checks all 31 sites offline |
 
 The **look is unchanged** from v0.1.0: the same tuned shadow, fog, crowd and
 texture-streaming values are used. What changed is that the engine can no longer
@@ -347,7 +367,7 @@ Convenience scripts:
   pattern-matches the parsers/getters/`apply`, and re-derives enforcement sites by
   attribute name when a hard-coded RVA no longer validates. The names are taken
   from the string constants the engine loads before each `call <parser>`. Verified
-  offline by `scantest.exe` (12/12 integer + 17/17 boolean sites reproduced).
+  offline by `scantest.exe` (12/12 integer + 17/17 boolean + 2/2 float sites reproduced).
 - **In-engine enforcement (v0.2.0):** the settings parser (`0x534dcd8`) is detoured and
   keyed on the *return address* of each call site, so the tuned value is substituted at
   the point of use. Each call site parses one attribute of one settings element into the
@@ -358,6 +378,13 @@ Convenience scripts:
   `cheaper` (only ever trim work). `apply` / `applyNode` are detoured with naked
   pass-through thunks that replay the exact original stack, so their unknown signatures
   do not matter.
+- **Float enforcement (v0.2.6):** float attributes go through the two-argument thunk
+  `0x5343ff4` into the core parser `0x5343ffc` (`_strtof_s` shape, result written through
+  `rcx`). The core is detoured — the thunk is a branch and cannot be relocated — while
+  call sites are validated against the thunk. The detour keeps the original parse and
+  overwrites `*out` only for `groundCover.drawDistance` (`0x3ce448b`) and
+  `proceduralCloudRTScale` (`0x15b2ef`). `cheaper` takes `min(preset, tuned)`, since lower
+  is cheaper for both.
 
 ---
 
@@ -458,4 +485,4 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
 MIT — see [LICENSE](LICENSE). Provided "as is", without warranty; see the disclaimer
 above.
 
-Version **0.2.5** — changes in [CHANGELOG.md](CHANGELOG.md).
+Version **0.2.6** - changes in [CHANGELOG.md](CHANGELOG.md).

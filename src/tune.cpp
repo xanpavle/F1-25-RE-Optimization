@@ -34,6 +34,7 @@ struct EnfOv {
     char    name[96];
     int32_t value;
     int     disable;
+    int     is_float;   // value holds IEEE-754 bits (ini used a decimal literal)
 };
 const int kMaxEnfOv = 256;
 EnfOv     g_enfov[kMaxEnfOv];
@@ -236,6 +237,7 @@ void AddEnfOv(const char* name, const char* value) {
     e.name[sizeof(e.name) - 1] = 0;
     e.disable = 0;
     e.value = 0;
+    e.is_float = 0;
     if (!_stricmp(value, "off") || !_stricmp(value, "disable") ||
         !_stricmp(value, "disabled") || !_stricmp(value, "none") ||
         !_stricmp(value, "default") || !strcmp(value, "-")) {
@@ -247,6 +249,7 @@ void AddEnfOv(const char* name, const char* value) {
     int is_float = 0;
     if (!ParseValue(value, &raw, &is_float)) return;
     e.value = (int32_t)raw;
+    e.is_float = is_float;
     g_enfov[g_enfov_count++] = e;
 }
 
@@ -585,6 +588,23 @@ bool LookupEnforce(const char* name, int* value, int* disable) {
             if (disable) *disable = g_enfov[i].disable;
             return true;
         }
+    }
+    return false;
+}
+
+bool LookupEnforceFloat(const char* name, float* value, int* disable) {
+    if (!name) return false;
+    for (int i = 0; i < g_enfov_count; ++i) {
+        if (strcmp(g_enfov[i].name, name) != 0) continue;
+        if (value) {
+            if (g_enfov[i].is_float) {
+                memcpy(value, &g_enfov[i].value, sizeof(float));
+            } else {
+                *value = (float)g_enfov[i].value;
+            }
+        }
+        if (disable) *disable = g_enfov[i].disable;
+        return true;
     }
     return false;
 }

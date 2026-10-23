@@ -10,7 +10,7 @@ It is **rewritten on every launch**, so it always describes the current session.
 A healthy launch is short and looks like this:
 
 ```
-[mod] F1 25 RE-Optimization v0.2.5
+[mod] F1 25 RE-Optimization v0.2.6
 [mod] session: exe=...\F1_25.exe (408063872 bytes)
 [mod] session: ini=...\f125_tune.ini
 [mod] profile: saved stock backup hardware_settings_config.xml.untuned
@@ -19,7 +19,9 @@ A healthy launch is short and looks like this:
 [mod] profile applied (tuned delta on hardware_settings_config.xml)
 [mod] enforce: using known addresses (prologue verified)
 [mod] enforce: int parser at the known RVA (prologue verified)
+[mod] enforce: float parser at the known RVA (prologue verified)
 [mod] enforce: settings parser hooked (tuned values applied in-engine)
+[mod] enforce: float parser hooked (cloud RT scale / grass distance)
 [mod] enforce: 17 bool attributes pinned to the tuned profile (0 disabled, 0 unavailable)
 [mod] guard: preset hooks installed (apply=yes, applyNode=yes) - delta auto-restored after menu changes
 [mod] hooks installed OK
@@ -33,7 +35,7 @@ Find your line below.
 
 | Line | Meaning | What to do |
 |---|---|---|
-| `[mod] F1 25 RE-Optimization v0.2.5` | The DLL loaded with the game. | Good — the proxy is working. |
+| `[mod] F1 25 RE-Optimization v0.2.6` | The DLL loaded with the game. | Good - the proxy is working. |
 | `[mod] session: exe=… / ini=…` | Which executable and ini the mod actually loaded. | Check both paths if you have several game copies. |
 | `[mod] hooks installed OK` | Both engine accessors were verified and patched. | Good. |
 | `[mod] enforce: int parser at the known RVA (prologue verified)` | Same game build as the mod was derived from; the fast path was used. | Good. |

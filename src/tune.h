@@ -52,6 +52,9 @@ profile::Upscaler ChooseUpscaler(const gpu::Info& g, const char* mode);
 // *disable is set for "off"/"disable"/"none"/"-" (skip that attribute).
 bool LookupEnforce(const char* name, int* value, int* disable);
 
+// Float variant: [enforce] accepts decimal literals ("2.0", "80.0").
+bool LookupEnforceFloat(const char* name, float* value, int* disable);
+
 // Game / ini paths (for diagnostics).
 const wchar_t* ExeDir();
 const wchar_t* IniPath();

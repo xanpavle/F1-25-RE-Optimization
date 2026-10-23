@@ -5,6 +5,38 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.2.6] - 2026-10-23
+
+**Float settings are now enforced in-engine too.**
+
+### Added
+
+- **In-engine enforcement for the remaining float attributes.** The two float
+  entries that the file profile already wrote but the preset clamp could still
+  revert are now substituted at the point of use:
+  - `weather_effects.proceduralCloudRTScale` = `2.0`
+  - `ground_cover.drawDistance` = `80.0`
+
+  The engine parses float attributes with a shared `_strtof_s`-shaped parser
+  (`FUN_145343ffc`, reached through the two-argument thunk `FUN_145343ff4`) that
+  writes the value through an out pointer. The mod detours the core entry and
+  compares the call site's return address, exactly like the integer table, so only
+  the two known attributes are replaced and every other float setting falls
+  through unchanged. `cheaper` mode keeps `min(preset, tuned)`; `target` forces the
+  tuned value.
+- **`[enforce]` accepts decimal values.** `LookupEnforceFloat` distinguishes an
+  IEEE-754 literal from an integer, so `proceduralCloudRTScale = 2.0` and
+  `groundCover.drawDistance = 80.0` can be overridden or disabled (`= off`)
+  without rebuilding.
+- **Float self-healing + tests.** The float parser is validated by prologue on the
+  known RVAs and otherwise re-derived from its 26-byte signature, scoring the two
+  attribute names through the thunk. `scantest` now validates and re-discovers
+  12 integer, 17 boolean and 2 float sites (31 total).
+
+### Changed
+
+- Version bumped to `0.2.6` in the DLL, installer output, README and docs.
+
 ## [0.2.5] - 2026-10-21
 
 **The auto-selected upscaler now actually applies — the single biggest FPS lever.**

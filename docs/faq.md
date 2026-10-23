@@ -149,22 +149,25 @@ a second.
 
 ## Did it actually work?
 
-Open `f125_tune.log` in the game folder. A healthy v0.2.0 launch looks like:
+Open `f125_tune.log` in the game folder. A healthy v0.2.6 launch looks like:
 
 ```
-[mod] F1 25 RE-Optimization v0.2.5
+[mod] F1 25 RE-Optimization v0.2.6
 [mod] session: exe=...\F1_25.exe (408063872 bytes)
 [mod] GPU: AMD Radeon RX 7800 XT (AMD 7000-series)
 [mod] upscaler: mode=auto -> FSR 3
 [mod] profile applied (tuned delta on hardware_settings_config.xml)
 [mod] enforce: using known addresses (prologue verified)
 [mod] enforce: int parser at the known RVA (prologue verified)
+[mod] enforce: float parser at the known RVA (prologue verified)
 [mod] enforce: settings parser hooked (tuned values applied in-engine)
+[mod] enforce: float parser hooked (cloud RT scale / grass distance)
 [mod] enforce: 17 bool attributes pinned to the tuned profile (0 disabled, 0 unavailable)
 [mod] guard: preset hooks installed (apply=yes, applyNode=yes) - delta auto-restored after menu changes
 [mod] hooks installed OK
 [mod] enforce: worldShadowMapSize -> 2048 (preset gave 1024, mode=target)
 [mod] enforce: volumetricFogMapWidth -> 512 (preset gave 256, mode=target)
+[mod] enforce: groundCover.drawDistance -> 80 (preset gave 120, mode=target)
 ...
 ```
 

@@ -25,6 +25,8 @@ RVA = VA − `0x140000000`.
 |---|---|---|
 | int attribute parser `FUN_14534dcd8` | `0x534dcd8` | `(const char* value, int def, int flags) -> int` |
 | bool attribute check `FUN_14534d918` | `0x534d918` | returns `0` for `"true"`; callers do `test eax,eax; sete` |
+| float attribute parser thunk `FUN_145343ff4` | `0x5343ff4` | 2-arg thunk (`xor r8d,r8d; jmp`) used by every float call site |
+| float attribute parser core `FUN_145343ffc` | `0x5343ffc` | `_strtof_s` shape: `(float* out, const char* value, char** end) -> errno_t` |
 | bool attribute getter `FUN_143a43b90` | `0x3a43b90` | `(node, name, uint8_t* out, uint8_t def)` |
 | 32-bit attribute getter `FUN_143a43240` | `0x3a43240` | `(node, name, uint32_t* out, uint32_t def)` |
 | `hardwareSettings::Options::apply` | `0x40217f0` | prologue `… 48 81 EC F8 02 00 00` |
@@ -46,6 +48,13 @@ RVA = VA − `0x140000000`.
 | `volumetricFogMapHeight` | `0x3ca519f` | 288 |
 | `billboardDistance` | `0x3c6013b` | 2500 |
 | `sizeInMiB` (`textureStreamingMiB`) | `0x71f855b` | 2048 |
+
+### Enforced float sites (return address of `call <float thunk>`)
+
+| Attribute | return RVA | value |
+|---|---|---|
+| `groundCover.drawDistance` | `0x3ce448b` | 80.0 |
+| `proceduralCloudRTScale` | `0x15b2ef` | 2.0 |
 
 ### Pinned boolean sites (call address of `call parseBool`)
 
@@ -79,6 +88,27 @@ original parser runs first, so every engine side effect is preserved; only the
 returned value changes. Nothing is written to engine memory, so an unknown site
 falls through harmlessly.
 
+### Float attributes
+
+Floats use the same idea with a different ABI. Every float call site targets the
+thunk `FUN_145343ff4` (`xor r8d,r8d; jmp FUN_145343ffc`), and the core parser writes
+its result through `rcx`:
+
+```
+lea  rcx,[rsp+out]        ; float* out
+mov  rdx,[attr+0x50]      ; value string
+call FUN_145343ff4
+vmovss xmm0,[rsp+out]
+```
+
+The thunk is a branch and cannot be relocated, so the detour is installed on the
+core entry (`FUN_145343ffc`, a 16-byte clean prologue) while call sites are
+validated against the thunk. The detour calls the original first, then overwrites
+`*out` only when the return address matches `0x3ce448b` or `0x15b2ef`. Lower is
+cheaper for both attributes, so `cheaper` mode keeps `min(preset, tuned)`. The
+signature starts at the thunk so the scanner can derive both addresses
+(`core = thunk + 8 + rel32`).
+
 ### 5-byte boolean pinning
 
 The boolean check is `call parseBool` (5 bytes) followed by `test eax,eax; sete`.
@@ -97,7 +127,7 @@ checks before it will use FSR 3.
 
 ### Enforcement modes
 
-`enforce_mode = target` substitutes the tuned integer unconditionally.
+`enforce_mode = target` substitutes the tuned integer/float unconditionally.
 `enforce_mode = cheaper` uses it as a ceiling (`min(preset, tuned)`), so it only ever
 removes work. Boolean pinning is independent of the mode: the table above already
 encodes the intended look (rain / grass / fog on; god rays / lens streak / motion blur
