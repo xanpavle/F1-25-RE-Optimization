@@ -459,8 +459,8 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
 - [x] Pattern-scan the prologues and re-derive enforcement sites by attribute name,
       so one DLL survives most game updates — `v0.2.0`, validated by `scantest`.
 - [x] User-tunable enforcement table via the `[enforce]` ini section — `v0.2.0`.
-- [ ] Extend in-engine enforcement to the remaining float settings (cloud RT scale, grass
-      distance) using the same return-address technique.
+- [x] Extend in-engine enforcement to the remaining float settings (cloud RT scale,
+      grass distance) using the same return-address technique — `v0.2.6`.
 - [ ] Investigate the engine's **cvar registry** (`Renderer.Gfx.*`, `JobQueueSystem.*`,
       `Vehicle.*`, `Audio.*`, `ErpLoader.*`) — a name→value plane beyond the settings XML.
       Mapped from the binary, **not implemented**; runtime writability is unproven. If it
@@ -475,8 +475,6 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
       needs RTX 40/50 testers; no effect on the AMD reference machine.
 - [ ] Optional "RT-lite" override profile (RT AO / DDGI / shadows off via the engine
       knobs — menu-proof).
-- [ ] Per-GPU preset table (`safe` / `balanced` / `aggressive`) instead of the single
-      reference tuning.
 
 ---
 
