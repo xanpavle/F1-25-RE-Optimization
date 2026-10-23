@@ -5,6 +5,62 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.2.7] - 2026-10-23
+
+**Preset capture fixed: the right settings tree, real line breaks and a bounded
+dump. The shipped look and the enforcer are unchanged.**
+
+### Added
+
+- **Settings-root candidate log.** A capture now records every hardware-settings
+  document it found, once, before choosing one:
+  `preset dump: root candidate <name> <ptr> valid=.. preset=..` for the config,
+  info, options and ratings documents, so the source of a dump is never
+  ambiguous in the log.
+- **Dump footer and truncation flag.** Every dump ends with `# attributes=N`,
+  `# nodes=N` and `# truncated=yes|no`, so a bounded capture is visible as such
+  instead of looking complete.
+- **Applied sequence in the dump.** The tree is written in the same order the
+  engine applies it (`applyNode`: a node's attributes first, then its children in
+  document order), which is the reference sequence `presets.json` needs. The
+  engine's own `"Applying reference '%s:%s'"` log strings are not captured.
+
+### Changed
+
+- **Boot capture is event-driven.** The launch capture no longer waits a blind
+  20 seconds; it starts once the integer/float parser detours have seen real
+  parser activity, then allows a short settle window and a bounded number of
+  retries before giving up.
+- Version bumped to `0.2.7` in the DLL, installer output, README and docs.
+
+### Fixed
+
+- **The dump was written with a literal `\n`.** Every line break was escaped as
+  text, so the whole preset tree landed on a single line. The writer now emits
+  real newlines, one `category:attribute=value` entry per line.
+- **The stale hard-coded probe and the blind watcher fallback are gone.** The
+  old `TryDumpPreset` still read the fixed address `0x146044700` and the watcher
+  called it after 20 seconds, which could dump an unrelated pointer. That code
+  (`TryDumpPreset`, `g_dump_done`, the probe) was removed; the capture now uses
+  the verified live settings root only.
+- **The tree walk was unbounded.** A corrupt or unexpectedly large tree could
+  read unterminated strings, repeat/cycle through nodes, or write a
+  multi-megabyte file. The walk now formats with `%.128s` for node and
+  attribute names and `%.256s` for values, caps itself at 8192 nodes and 50000
+  attributes, keeps a visited set to stop cycles, and reports any cap hit in the
+  `# truncated=` footer.
+- **The capture resolved the wrong settings root.** It used the hardware-info
+  document at `0x14604e628`, so dumps only contained
+  `graphics_card` / `systemInfo` / `resolution` data and never preset values.
+  The live preset tree is the `hardware_settings_config` document:
+  `hardwareSettings::Options::apply` is called as
+  `apply(optionsDb, settingsDoc, "graphicsDetail"|"safe_mode", presetName)` and
+  reads the tree from `[settingsDoc + 0x10]`. With `settingsDoc` at
+  `0x146044700` the root pointer lives at `0x146044710` (RVA `0x6044710`). The
+  capture now prefers that tree, content-checked for a `shadows` /
+  `weather_effects` / `antialiasing` / `ground_cover` child, and falls back to
+  the first shape-valid candidate only while the config tree is not ready.
+
 ## [0.2.6] - 2026-10-23
 
 **Float settings are now enforced in-engine too.**

@@ -4,7 +4,7 @@ A runtime renderer optimisation for **F1 25** (EGO engine, Codemasters / EA), bu
 by reverse-engineering the shipped executable. It makes the renderer do **less work
 for the same look** — no `F1_25.exe` bytes are patched on disk.
 
-**v0.2.6** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
+**v0.2.7** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
 
 Built and tested on a single machine, offline, single-player.
 
@@ -68,6 +68,26 @@ raster/RT delta adds the rest. Numbers are from a single machine and will vary.
 > with `benchmark\Benchmark_*.xml` on your own machine.
 
 ---
+
+## What changed in v0.2.7
+
+A bugfix release for the **preset-capture diagnostics**, not for the rendered
+image — the shipped look, the enforcer and the upscaler selection are unchanged.
+
+The internal preset dump (written on each launch once the settings have loaded,
+and after a preset is applied when the hook observes it) now reads the
+correct live settings tree, `hardware_settings_config`, instead of the detected
+hardware-info tree. Earlier dumps therefore contained only
+`graphics_card`/`systemInfo`/`resolution` data and never a preset value; they also
+collapsed onto one line because the line breaks were escaped as text. The dump now
+writes real newlines, one `category:attribute=value` entry per line in the same
+order the engine applies the tree, bounds every string and caps the walk
+(8192 nodes / 50000 attributes, cycle detection), and ends with
+`# attributes=`, `# nodes=` and `# truncated=` so a partial capture is visible as
+such. The stale fixed-address probe and the blind 20-second watcher fallback that
+could dump an unrelated pointer are gone; the launch capture is event-driven and
+logs which settings document it picked. (The engine's own `"Applying reference"`
+log strings are not captured; the applied tree is dumped in that order instead.)
 
 ## What changed in v0.2.6
 
@@ -483,4 +503,4 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
 MIT — see [LICENSE](LICENSE). Provided "as is", without warranty; see the disclaimer
 above.
 
-Version **0.2.6** - changes in [CHANGELOG.md](CHANGELOG.md).
+Version **0.2.7** - changes in [CHANGELOG.md](CHANGELOG.md).

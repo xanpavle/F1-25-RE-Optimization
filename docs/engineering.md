@@ -32,6 +32,29 @@ RVA = VA − `0x140000000`.
 | `hardwareSettings::Options::apply` | `0x40217f0` | prologue `… 48 81 EC F8 02 00 00` |
 | `hardwareSettings::Options::applyNode` | `0x40226c0` | prologue `… 48 81 EC 98 00 00 00` |
 
+`apply` is called as
+`apply(optionsDb, settingsDoc, "graphicsDetail"|"safe_mode", presetName)`: the
+second argument is the settings document and the function reads the tree it
+applies from `[settingsDoc + 0x10]`. The other three documents are separate
+during initialisation (see below).
+
+### Hardware-settings documents (settings roots)
+
+`Application::initialiseHardwareSettings` creates several hardware-settings
+documents and keeps each behind a global pointer slot. Only the **config**
+document is the live preset tree; the others hold hardware detection, the
+options database and the ratings.
+
+| Document | Global (VA) | RVA | Contents |
+|---|---|---|---|
+| `hardware_settings_config` | `0x146044710` | `0x6044710` | **live preset tree** — category nodes (`shadows`, `weather_effects`, `antialiasing`, `ground_cover`, …) with their attributes |
+| `hardware_settings_info` | `0x14604e628` | `0x604e628` | detected hardware (`graphics_card` / `systemInfo` / `resolution`) |
+| `hardware_settings_options` | `0x14604e5f8` | `0x604e5f8` | options database (`defaultForAMD` / `defaultForNvidia` blocks, restriction rules) |
+| `hardware_settings_ratings` | `0x146cb7a78` | `0x6cb7a78` | per-preset ratings document |
+
+The config document itself is `0x146044700`; its root-node pointer is stored at
+`+0x10`, i.e. the global slot `0x146044710` (`RVA 0x6044710`).
+
 ### Enforced integer sites (return address of `call parseInt`)
 
 | Attribute | return RVA | value |
@@ -190,3 +213,68 @@ rewrites the file), so the in-engine substitution is the only lever for
 preset-restricted attributes. The file delta still covers the attributes the preset
 does not manage (SSAO/SSR quality, cloud RT scale, grass distance, reflection update
 mode, …).
+
+The file is the exported view of the live `hardware_settings_config` document
+(root slot `0x146044710`). `hardwareSettings::Options::apply` applies a preset to
+that document (see the call convention above) and `::applyNode` applies one node;
+the mod detours both with stack-preserving thunks and restores the tuned delta to
+the file afterwards. The same post-hook is where a preset capture dumps the
+applied tree — see below.
+
+## Preset capture (v0.2.7)
+
+A capture writes one file, `f125_preset_<preset>.txt`, next to `F1_25.exe`: one
+`category:attribute=value` entry per line (real newlines). The tree is captured
+once per launch after the settings have loaded, and from the post-apply hook when
+that hook observes an apply. The preset name comes from a `category` attribute
+found anywhere in the tree; the config tree does not carry one, so a launch
+capture is written as `f125_preset_unknown.txt`.
+
+### Root resolution
+
+`src/enforce.cpp` resolves the live root from the four documents above. It prefers
+the config document and only accepts it when the tree carries at least one of the
+child categories `shadows`, `weather_effects`, `antialiasing` or `ground_cover`.
+While the config tree is still being initialised it falls back to the first
+shape-valid document. Every capture logs each candidate once, so the source of a
+dump is visible in the log:
+
+```
+preset dump: root candidate config   <ptr> valid=yes preset=yes
+preset dump: root candidate info     <ptr> valid=yes preset=no
+preset dump: root candidate options  <ptr> valid=yes preset=no
+preset dump: root candidate ratings  <ptr> valid=yes preset=no
+```
+
+A previous revision read only the info document at `0x14604e628`, so its dumps
+contained `graphics_card` / `systemInfo` / `resolution` but no preset values.
+
+### When a capture runs
+
+The launch capture is **event-driven**: it waits until the integer/float parser
+detours have seen real parser activity instead of sleeping for a fixed startup
+delay, then retries a bounded number of times before giving up. A failed root is
+logged, not guessed. When the `apply` / `applyNode` detours are installed early
+enough to observe an apply, the same post-hook also captures the tree it was
+handed; in practice the launch capture is the path that fires, because
+`Application::initialiseHardwareSettings` can run before the detour scan finishes.
+
+### Bounded walk and footer
+
+The walk uses the engine node layout of the tree handed to `apply` / `applyNode`:
+node name at `+0x18`, attribute pointer array at `+0x50`/`+0x58`, child-node
+array at `+0x70`/`+0x78`; an attribute has its name at `+0x18` and value string
+at `+0x50`.
+It is bounded so a corrupt or unexpectedly large tree cannot produce a giant file
+or an endless walk:
+
+- strings are formatted with `%.128s` (node and attribute names) and `%.256s`
+  (values), so an unterminated string cannot run away;
+- at most **8192 nodes** and **50000 attributes** are written;
+- a visited set stops cycles / repeated nodes, and unreadable pointers are
+  treated as truncation;
+- the file always ends with its counters:
+  `# attributes=N`, `# nodes=N`, `# truncated=yes|no`.
+
+`truncated=yes` means at least one bound (or an unreadable pointer) was hit, so a
+partial dump is explicit rather than looking complete.

@@ -5,11 +5,11 @@
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 namespace enforce {
 void DumpPreset(void* root);
-void TryDumpPreset(void);
 namespace {
 
 // --- F1_25.exe (image base 0x140000000, no ASLR) -----------------------------
@@ -32,6 +32,36 @@ static const uintptr_t kRvaParseFloat      = 0x5343ffcu;
 // "[hardwareSettings::Options::apply]" / "[...applyNode]" log strings).
 static const uintptr_t kRvaApply     = 0x40217f0u;
 static const uintptr_t kRvaApplyNode = 0x40226c0u;
+
+// The live preset tree is the *settings* document, not the hardware-info one.
+//
+// `hardwareSettings::Options::apply` is called as
+//     apply(optionsDb, settingsDoc, "graphicsDetail"|"safe_mode", presetName)
+// and reads the tree it writes into from `[settingsDoc + 0x10]`
+// (0x144021d71: mov rax,[rbp+0x10], rbp = 2nd argument). The caller passes
+// settingsDoc = 0x146044700, so the live root is the pointer stored at
+// 0x146044710 (RVA 0x6044710), created in
+// Application::initialiseHardwareSettings.
+//
+// 0x14604e628, which an earlier revision used, is a *different* document: the
+// detected `hardware_settings_info` tree (graphics_card/systemInfo/...). That is
+// why the previous dumps contained no preset values.
+//
+// Every hardware-settings document created during initialisation is listed
+// below. Only the config tree is the preset tree; the others are reported when
+// a capture is requested so the dump source can never be ambiguous.
+struct RootCandidate {
+    uintptr_t   rva;
+    const char* what;
+};
+static const RootCandidate kRootCandidates[] = {
+    {0x6044710u, "config"},    // hardware_settings_config - live preset tree
+    {0x604e628u, "info"},      // hardware_settings_info - detected hardware
+    {0x604e5f8u, "options"},   // hardware_settings_options database
+    {0x6cb7a78u, "ratings"},   // hardware_settings_ratings
+};
+const int kRootCandidateCount =
+    (int)(sizeof(kRootCandidates) / sizeof(kRootCandidates[0]));
 
 // Prologue shapes, matched as patterns rather than raw bytes. The trailing
 // stack-frame immediate is wildcarded: its value changes between game builds and
@@ -174,6 +204,8 @@ typedef int (*ParseFloatFn)(float*, const char*, char**);
 ParseFloatFn g_parseFloatTramp = nullptr;
 
 volatile long g_dirty = 0;
+volatile long g_parser_active = 0;   // set by the parser detours once settings are loading
+volatile long g_boot_dump_done = 0;  // one boot-time root capture, if apply ran too early
 volatile long g_stop  = 0;
 HANDLE        g_thread = nullptr;
 bool          g_enforce_on = false;
@@ -201,6 +233,88 @@ bool Readable(const void* p, size_t n) {
     if ((uintptr_t)p + n > (uintptr_t)mbi.BaseAddress + mbi.RegionSize)
         return false;
     return true;
+}
+
+// Shape check for the statically allocated settings root. This guards the
+// boot-time capture: if the object has not been populated yet, or the layout
+// changed in a game update, we skip the dump instead of walking garbage.
+bool NodeLooksValid(const void* n) {
+    if (!n || !Readable(n, 0x80)) return false;
+    const char* name = *(const char**)((const char*)n + 0x18);
+    if (!name || !Readable(name, 1)) return false;
+    void** as = *(void***)((const char*)n + 0x50);
+    void** ae = *(void***)((const char*)n + 0x58);
+    void** cs = *(void***)((const char*)n + 0x70);
+    void** ce = *(void***)((const char*)n + 0x78);
+    if (!as || !ae || ae < as || (size_t)(ae - as) > 100000) return false;
+    if (!cs || !ce || ce < cs || (size_t)(ce - cs) > 100000) return false;
+    return true;
+}
+
+// True when a node has a direct child with exactly `want` as its name. Used to
+// tell the config/preset tree (shadows, weather_effects, ...) apart from the
+// hardware-info tree (graphics_card, systemInfo, ...), which has no such child.
+bool NodeHasChildNamed(const void* n, const char* want) {
+    if (!n || !Readable(n, 0x80)) return false;
+    void** cs = *(void***)((const char*)n + 0x70);
+    void** ce = *(void***)((const char*)n + 0x78);
+    if (!Readable(cs, 0) || !Readable(ce, 0) || ce < cs ||
+        (size_t)(ce - cs) > 4096) {
+        return false;
+    }
+    for (void** p = cs; p < ce; ++p) {
+        if (!Readable(p, sizeof(void*))) break;
+        const void* c = *p;
+        if (!c || !Readable(c, 0x20)) continue;
+        const char* nm = *(const char**)((const char*)c + 0x18);
+        if (!nm || !Readable(nm, 1)) continue;
+        if (strncmp(nm, want, 127) == 0) return true;
+    }
+    return false;
+}
+
+// The preset (config) tree always carries at least one of these categories.
+bool LooksLikePresetTree(const void* n) {
+    return NodeHasChildNamed(n, "shadows") ||
+           NodeHasChildNamed(n, "weather_effects") ||
+           NodeHasChildNamed(n, "antialiasing") ||
+           NodeHasChildNamed(n, "ground_cover");
+}
+
+void* RootAt(uintptr_t rva) {
+    const uintptr_t slot = g_base + rva;
+    if (!Readable((const void*)slot, sizeof(void*))) return nullptr;
+    return *(void**)slot;
+}
+
+// Resolve the live settings root. The config document is preferred, but because
+// initialisation order differs between launches, fall back to any
+// shape-valid document so a capture can still be produced.
+void* SettingsRoot() {
+    void* first = nullptr;
+    for (int i = 0; i < kRootCandidateCount; ++i) {
+        void* cand = RootAt(kRootCandidates[i].rva);
+        if (!NodeLooksValid(cand)) continue;
+        if (LooksLikePresetTree(cand)) return cand;
+        if (!first) first = cand;
+    }
+    return first;
+}
+
+// One-shot diagnostic: report every candidate document and whether it is the
+// preset tree. Written to the mod log when a capture is requested.
+void LogRootCandidates() {
+    for (int i = 0; i < kRootCandidateCount; ++i) {
+        void* cand = RootAt(kRootCandidates[i].rva);
+        char line[256];
+        _snprintf(line, sizeof(line),
+                  "preset dump: root candidate %-8s %p valid=%s preset=%s",
+                  kRootCandidates[i].what, cand,
+                  NodeLooksValid(cand) ? "yes" : "no",
+                  LooksLikePresetTree(cand) ? "yes" : "no");
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+    }
 }
 
 void EnsureImage() {
@@ -517,6 +631,7 @@ void ApplyOverrides() {
 }
 
 int DetourParseInt(const char* value, int def, int flags) {
+    InterlockedExchange(&g_parser_active, 1);
     const uintptr_t rva = (uintptr_t)__builtin_return_address(0) - g_base;
     const int orig = g_parseTramp(value, def, flags);
 
@@ -559,6 +674,7 @@ int DetourParseInt(const char* value, int def, int flags) {
 }
 
 int DetourParseFloat(float* out, const char* value, char** end) {
+    InterlockedExchange(&g_parser_active, 1);
     const uintptr_t rva = (uintptr_t)__builtin_return_address(0) - g_base;
     const int rc = g_parseFloatTramp(out, value, end);
 
@@ -600,18 +716,71 @@ int DetourParseFloat(float* out, const char* value, char** end) {
     return rc;
 }
 
-static volatile long g_dump_done = 0;
-
 DWORD WINAPI Watcher(LPVOID) {
-    // Give the engine time to load settings, then capture a preset dump even if
-    // hardwareSettings::Options::apply ran before our hooks were installed.
-    Sleep(20000);
-    if (!g_dump_done) {
-        TryDumpPreset();
-    }
-
+    int boot_tries = 0;
     while (!g_stop) {
         Sleep(500);
+
+        // Temporary/manual capture hook: create f125_dump_now.txt next to the
+        // game while the settings screen is open. Used to validate the dump on
+        // builds where the engine's apply hook is not reached.
+        if (GetFileAttributesW(L"f125_dump_now.txt") != INVALID_FILE_ATTRIBUTES) {
+            DeleteFileW(L"f125_dump_now.txt");
+            LogRootCandidates();
+            void* root = SettingsRoot();
+            if (NodeLooksValid(root)) {
+                DumpPreset(root);
+                tune::Note("preset dump: manual trigger captured");
+            } else if (Readable(root, 0x80)) {
+                const uintptr_t* q = (const uintptr_t*)root;
+                char line[320];
+                _snprintf(line, sizeof(line),
+                          "preset dump: manual root %p invalid (name=%p attrs=%p..%p kids=%p..%p)",
+                          root, (void*)q[3], (void*)q[10], (void*)q[11],
+                          (void*)q[14], (void*)q[15]);
+                line[sizeof(line) - 1] = 0;
+                tune::Note(line);
+            } else {
+                tune::Note("preset dump: manual root unreadable");
+            }
+        }
+
+        // The boot parse runs before the UI exists, and on some launches before
+        // the apply hook is reached. Once the int/float parser detours have
+        // seen real settings, the verified static root is safe to capture. This
+        // is event-driven (parser activity), not a blind startup delay.
+        if (!g_boot_dump_done && g_parser_active) {
+            Sleep(2500);
+            if (g_stop) break;
+            if (InterlockedCompareExchange(&g_boot_dump_done, 0, 0) == 0) {
+                LogRootCandidates();
+                void* root = SettingsRoot();
+                if (NodeLooksValid(root)) {
+                    DumpPreset(root);
+                    InterlockedExchange(&g_boot_dump_done, 1);
+                    tune::Note("preset dump: boot settings root captured");
+                } else if (++boot_tries >= 6) {
+                    InterlockedExchange(&g_boot_dump_done, 1);
+                    tune::Note("preset dump: boot settings root never became valid");
+                } else {
+                    char line[320];
+                    if (Readable(root, 0x80)) {
+                        const uintptr_t* q = (const uintptr_t*)root;
+                        _snprintf(line, sizeof(line),
+                                  "preset dump: boot root %p not ready (name=%p attrs=%p..%p kids=%p..%p)",
+                                  root, (void*)q[3], (void*)q[10], (void*)q[11],
+                                  (void*)q[14], (void*)q[15]);
+                    } else {
+                        _snprintf(line, sizeof(line),
+                                  "preset dump: boot root %p unreadable (base=%p)", root,
+                                  (void*)g_base);
+                    }
+                    line[sizeof(line) - 1] = 0;
+                    tune::Note(line);
+                }
+            }
+        }
+
         if (InterlockedExchange(&g_dirty, 0)) {
             // The engine is mid-apply; give it a moment, then restore the file.
             Sleep(900);
@@ -719,7 +888,18 @@ void DumpPreset(void* root) {
     FILE* f = _wfopen(path, L"w");
     if (!f) return;
 
-    fprintf(f, "# preset=%s\\n", preset);
+    // Output caps keep a corrupt or unexpectedly deep tree from turning into a
+    // multi-megabyte file (or an endless walk). Any hit is marked in the footer.
+    const int kMaxNodes = 8192;
+    const int kMaxAttrs = 50000;
+    void** visited = (void**)malloc(sizeof(void*) * (size_t)kMaxNodes);
+    int visited_n = 0;
+    int nodes = 0, attrs = 0;
+    bool truncated = false;
+
+    fprintf(f, "# preset=%s\n", preset);
+    fprintf(f, "# source=hardware_settings_config tree "
+               "(category:attribute=value, applyNode order)\n");
 
     // Dump the whole tree. Use an explicit stack to avoid deep recursion.
     void* st[256];
@@ -727,7 +907,16 @@ void DumpPreset(void* root) {
     st[sp++] = root;
     while (sp > 0) {
         void* n = st[--sp];
-        if (!n || !Readable(n, 0x80)) continue;
+        if (!n || !Readable(n, 0x80)) { truncated = true; continue; }
+        if (++nodes > kMaxNodes) { truncated = true; break; }
+
+        // Settings are a tree; a repeated node means a cycle or a bad pointer.
+        bool seen = false;
+        for (int i = 0; i < visited_n; ++i) {
+            if (visited[i] == n) { seen = true; break; }
+        }
+        if (seen) { truncated = true; continue; }
+        if (visited && visited_n < kMaxNodes) visited[visited_n++] = n;
 
         const char* nname = *(const char**)((char*)n + 0x18);
         if (!nname || !Readable(nname, 1)) nname = "node";
@@ -737,64 +926,54 @@ void DumpPreset(void* root) {
         if (Readable(s, 0) && Readable(e, 0) && e >= s &&
             (size_t)(e - s) < 100000) {
             for (void** p = s; p < e; ++p) {
-                if (!Readable(p, sizeof(void*))) break;
+                if (!Readable(p, sizeof(void*))) { truncated = true; break; }
+                if (attrs >= kMaxAttrs) { truncated = true; break; }
                 void* a = *p;
-                if (!a || !Readable(a, 0x60)) continue;
+                if (!a || !Readable(a, 0x60)) { truncated = true; continue; }
                 const char* an = *(const char**)((char*)a + 0x18);
                 const char* av = *(const char**)((char*)a + 0x50);
-                if (!an || !Readable(an, 1)) continue;
+                if (!an || !Readable(an, 1)) { truncated = true; continue; }
                 if (!av || !Readable(av, 1)) av = "";
-                fprintf(f, "%s:%s=%s\\n", nname, an, av);
+                // Bounded strings: an unreasonably long or unterminated name
+                // must not produce a giant line or read past the mapping.
+                fprintf(f, "%.128s:%.128s=%.256s\n", nname, an, av);
+                ++attrs;
             }
+        } else if (s || e) {
+            truncated = true;
         }
 
         void** cs = *(void*** )((char*)n + 0x70);
         void** ce = *(void*** )((char*)n + 0x78);
         if (Readable(cs, 0) && Readable(ce, 0) && ce >= cs &&
             (size_t)(ce - cs) < 100000) {
-            for (void** p = cs; p < ce; ++p) {
-                if (!Readable(p, sizeof(void*))) break;
-                if (sp < 255) st[sp++] = *p;
+            // applyNode visits attributes before children and children in array
+            // order, so push them in reverse: the LIFO stack then pops them in
+            // document order (the reference sequence for the dump).
+            for (void** p = ce; p > cs; --p) {
+                if (!Readable(p - 1, sizeof(void*))) { truncated = true; break; }
+                if (sp >= 255) { truncated = true; break; }
+                st[sp++] = *(p - 1);
             }
+        } else if (cs || ce) {
+            truncated = true;
         }
+        if (attrs >= kMaxAttrs) { truncated = true; break; }
     }
 
+    fprintf(f, "# attributes=%d\n", attrs);
+    fprintf(f, "# nodes=%d\n", nodes);
+    fprintf(f, "# truncated=%s\n", truncated ? "yes" : "no");
+
+    free(visited);
     fclose(f);
 
-    char line[256];
-    _snprintf(line, sizeof(line), "preset dump written: f125_preset_%s.txt", safe);
+    char line[320];
+    _snprintf(line, sizeof(line),
+              "preset dump written: f125_preset_%s.txt (%d attributes, %d nodes, truncated=%s)",
+              safe, attrs, nodes, truncated ? "yes" : "no");
     line[sizeof(line) - 1] = 0;
     tune::Note(line);
-}
-
-void TryDumpPreset(void) {
-    if (g_dump_done) return;
-    void* root = g_applyRootNode;
-    if (!root) {
-        if (Readable((const void*)0x146044700u, sizeof(void*))) {
-            void* cand = *(void**)0x146044700u;
-            char dbg[256];
-            _snprintf(dbg, sizeof(dbg), "global candidate=%p", cand);
-            dbg[sizeof(dbg)-1]=0;
-            tune::Note(dbg);
-            if (cand && Readable(cand, 0x80)) {
-                // log first 8 qwords
-                for (int i = 0; i < 8; ++i) {
-                    void* v = ((void**)cand)[i];
-                    _snprintf(dbg, sizeof(dbg), "  cand[%d]=%p", i, v);
-                    dbg[sizeof(dbg)-1]=0;
-                    tune::Note(dbg);
-                }
-                root = cand;
-            }
-        }
-    }
-    if (root) {
-        DumpPreset(root);
-        InterlockedExchange(&g_dump_done, 1);
-    } else {
-        tune::Note("preset dump: no settings root found");
-    }
 }
 
 // Runs *after* hardwareSettings::Options::apply / applyNode. Debounced: it only
