@@ -221,6 +221,19 @@ the mod detours both with stack-preserving thunks and restores the tuned delta t
 the file afterwards. The same post-hook is where a preset capture dumps the
 applied tree — see below.
 
+### World-instance caps and Imola (v0.2.8)
+
+`[override]` used to lower `Renderer.maxStaticInstances` /
+`Renderer.maxPVSRenderInstances` to `20000` (engine defaults ≈ `24500` / `24800`).
+Those are culling caps on the number of submitted world instances: Imola packs the
+most static barrier / TecPro / guardrail instances of any track, so once a view
+passed 20000 the engine simply stopped submitting the overflow and barrier meshes
+flickered or disappeared. Other tracks stayed under the cap, which is why the
+symptom was Imola-only and why removing the overrides costs effectively nothing
+elsewhere. The lowered values are gone from the shipped ini; the mechanism itself
+(and the optional commented-out lines) remains for advanced users who do not race
+Imola. `cs_culling` is unrelated: it is still written `true` as before.
+
 ## Preset capture (v0.2.7)
 
 A capture writes one file, `f125_preset_<preset>.txt`, next to `F1_25.exe`: one

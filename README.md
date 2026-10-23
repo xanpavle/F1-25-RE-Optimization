@@ -4,7 +4,7 @@ A runtime renderer optimisation for **F1 25** (EGO engine, Codemasters / EA), bu
 by reverse-engineering the shipped executable. It makes the renderer do **less work
 for the same look** — no `F1_25.exe` bytes are patched on disk.
 
-**v0.2.7** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
+**v0.2.8** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
 
 Built and tested on a single machine, offline, single-player.
 
@@ -68,6 +68,21 @@ raster/RT delta adds the rest. Numbers are from a single machine and will vary.
 > with `benchmark\Benchmark_*.xml` on your own machine.
 
 ---
+
+## What changed in v0.2.8
+
+A one-issue hotfix for **Imola** only. The `[override]` block used to lower the
+engine's world-culling instance caps to `Renderer.maxStaticInstances = 20000` and
+`Renderer.maxPVSRenderInstances = 20000` (engine defaults are about 24500 / 24800).
+Imola has the densest static barrier / TecPro / guardrail scenery in the game, so
+once a view went past 20000 submitted instances the engine dropped those meshes —
+walls and fences glitched or vanished. The two overrides are removed and the engine
+defaults are used again. Other tracks stayed below the cap, so this costs
+effectively nothing there; `cs_culling` and every other tuning value are unchanged.
+
+Everyone else still gets the same profile as 0.2.7. If you never race Imola and
+want the more aggressive culling back, the two lines are documented (commented out)
+in the resulting `f125_tune.ini`.
 
 ## What changed in v0.2.7
 
@@ -162,7 +177,7 @@ Tuned attributes include: volumetric fog map (1920×1080 → 512×288), shadow-m
 (4096 → 2048), shadow sampling (3 → 2), SSR quality (4 → 2), the SSAO algorithm,
 grass draw distance (120 m → 80 m), crowd billboards, car-reflection scale and cube-map
 update rate, particles, hair, god rays / lens streak / motion-blur v2, cloud RT scale,
-plus `cs_culling` (the engine's generic GPU culling, default **off**) and a
+`cs_culling` (the engine's generic GPU culling, default **off**) and a
 texture-streaming bias.
 
 ### 1b. Re-applies the tuned values **inside the running engine**
@@ -503,4 +518,4 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
 MIT — see [LICENSE](LICENSE). Provided "as is", without warranty; see the disclaimer
 above.
 
-Version **0.2.7** - changes in [CHANGELOG.md](CHANGELOG.md).
+Version **0.2.8** - changes in [CHANGELOG.md](CHANGELOG.md).

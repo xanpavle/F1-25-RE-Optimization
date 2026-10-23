@@ -5,6 +5,30 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.2.8] - 2026-10-23
+
+**Imola barrier fix: the lowered world-instance caps are removed. Nothing else
+changes visually or in the shipped tuning.**
+
+### Fixed
+
+- **Imola barriers glitched or disappeared.** The `[override]` block lowered the
+  engine's world-culling instance caps to `Renderer.maxStaticInstances = 20000`
+  and `Renderer.maxPVSRenderInstances = 20000` (engine defaults are about
+  24500 / 24800). Imola has the densest static barrier / TecPro / guardrail
+  scenery in the game, so once a view went past that cap the engine stopped
+  submitting those meshes — walls and fences flickered or vanished on Imola
+  only. The two overrides were removed, so the engine defaults are used again.
+  Every other track was below the cap, which is why removing it costs
+  effectively nothing there.
+
+### Changed
+
+- **`[override]` note updated.** The two cap lines are now documented (commented
+  out) as an optional, deliberately aggressive setting; uncomment them only if
+  you never race Imola.
+- Version bumped to `0.2.8` in the DLL, installer output, README and docs.
+
 ## [0.2.7] - 2026-10-23
 
 **Preset capture fixed: the right settings tree, real line breaks and a bounded

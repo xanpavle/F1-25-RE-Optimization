@@ -41,7 +41,7 @@ Benchmark outputs: `%USERPROFILE%\Documents\My Games\F1 25\benchmark\`
 ## EXISTING ARTIFACTS (read these first, do not redo them)
 ```
 C:\Users\Pavle\Documents\Default Project\f125-re\            <- main workspace
-  repo\                     shipping mod source (v0.2.7) + README/CHANGELOG
+  repo\                     shipping mod source (v0.2.8) + README/CHANGELOG
     src\enforce.cpp         hook tables (int/bool call-site RVAs), pattern scan, watcher
     src\profile.cpp         tuned delta kOv + ApplyUpscaler
     src\tune.cpp            f125_tune.ini parsing, GPU->upscaler mapping, enforce_mode
@@ -87,6 +87,10 @@ Discovery strings differ from display names: `shadowSampling`->`"sampling"`,
 - The engine *does* honour `<antialiasing>` and `<rt_* enabled>` from the config on launch.
 - `fsr3` is **numeric** (`"0"/"1"`); `taa`/`dlss`/`xess` are `"true"/"false"`. `cas="1"` must be on
   for FSR 3 to engage. Writing `fsr3="true"` silently falls back to TAA (this was a real bug).
+- `Renderer.maxStaticInstances` / `Renderer.maxPVSRenderInstances` are hard caps on submitted world
+  instances. Lowering them to 20000 (engine defaults ≈24500/24800) dropped Imola's barrier / TecPro /
+  guardrail meshes at that track (v0.2.8 removed the overrides). Do not lower them below the engine
+  defaults in any profile.
 - Presets are **not** static: `hardware_settings_options.xml` contains per-vendor blocks
   (`defaultForAMD`, `defaultForNvidia`, `defaultForNGX`), conditions (`lowEndCPU`,
   `featureConservativeRasterization`, `featureRasterizeOrderViews`) and a rules language
