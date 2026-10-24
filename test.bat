@@ -17,6 +17,7 @@ echo == building tests ==
 "%GCC%" -O2 -I "%SRC%" -o "%OUT%\profiletest.exe" "%TST%\profiletest.cpp" "%SRC%\profile.cpp" -static -static-libgcc || goto :fail
 "%GCC%" -O2 -I "%SRC%" -o "%OUT%\gputest.exe" "%TST%\gputest.cpp" "%SRC%\gpu.cpp" -static -static-libgcc -luser32 -ladvapi32 || goto :fail
 "%GCC%" -O2 -I "%SRC%" -o "%OUT%\scantest.exe" "%TST%\scantest.cpp" "%SRC%\scan.cpp" -static -static-libgcc -luser32 || goto :fail
+"%GCC%" -O2 -I "%SRC%" -o "%OUT%\presettest.exe" "%TST%\presettest.cpp" "%SRC%\profile.cpp" -static -static-libgcc || goto :fail
 
 copy /Y "%~dp0f125_tune.ini" "%OUT%\f125_tune.ini" >nul
 
@@ -37,6 +38,9 @@ echo == enforcetest ==
 echo.
 echo == scantest (signature scanner; SKIP without the game) ==
 "%OUT%\scantest.exe" || goto :fail
+echo.
+echo == presettest ==
+"%OUT%\presettest.exe" "%TST%\ultra_settings.xml" || goto :fail
 echo.
 echo == profiletest: upscaler matrix ==
 for %%M in (keep dlss fsr3 xess taa off) do (

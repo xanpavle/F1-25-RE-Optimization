@@ -52,6 +52,51 @@ bool      g_profile_apply   = false;
 bool      g_want_guard      = true;
 char      g_upscaler_mode[16] = "auto";
 bool      g_unknown_build_off = false;
+profile::Preset g_preset    = profile::Preset::Balanced;
+
+// Per-preset defaults for the in-engine enforcement table. An explicit
+// [enforce] line in the ini always wins over these.
+struct PresetEnf {
+    const char* name;
+    float       value;
+};
+const PresetEnf kQualityEnf[] = {
+    {"worldShadowMapSize", 4096}, {"nightShadowMapSize", 4096},
+    {"skyShadowMapSize", 2048},   {"spotShadowMapSize", 2048},
+    {"spotShadowSampling", 3},    {"shadowSampling", 3},
+    {"nightShadowSourceCount", 4},
+    {"volumetricFogMapWidth", 960}, {"volumetricFogMapHeight", 540},
+    {"billboardDistance", 4000},
+    {"groundCover.drawDistance", 120.0f},
+};
+const PresetEnf kPotatoEnf[] = {
+    {"worldShadowMapSize", 1024}, {"nightShadowMapSize", 1024},
+    // skyShadowCascadeCount stays at the preset value: forcing it below 4
+    // in-engine makes the game quit at launch (other code still expects 4).
+    {"skyShadowMapSize", 1024},
+    {"spotShadowMapSize", 512},   {"spotShadowSampling", 0},
+    {"shadowSampling", 0},        {"nightShadowSourceCount", 1},
+    {"volumetricFogMapWidth", 256}, {"volumetricFogMapHeight", 128},
+    {"billboardDistance", 1000},  {"textureStreamingMiB", 1024},
+    {"groundCover.drawDistance", 40.0f},
+    {"proceduralCloudRTScale", 4.0f},
+};
+
+const PresetEnf* FindPresetEnf(const char* name) {
+    const PresetEnf* t = nullptr;
+    int n = 0;
+    if (g_preset == profile::Preset::Quality) {
+        t = kQualityEnf;
+        n = (int)(sizeof(kQualityEnf) / sizeof(kQualityEnf[0]));
+    } else if (g_preset == profile::Preset::Potato) {
+        t = kPotatoEnf;
+        n = (int)(sizeof(kPotatoEnf) / sizeof(kPotatoEnf[0]));
+    }
+    for (int i = 0; i < n; ++i) {
+        if (strcmp(t[i].name, name) == 0) return &t[i];
+    }
+    return nullptr;
+}
 bool      g_status_popup    = true;
 
 HMODULE   g_self = nullptr;
@@ -332,6 +377,10 @@ void ParseIni(const char* text) {
                 if (!_stricmp(val, "off") || !_stricmp(val, "none")) g_enf_mode = kEnfOff;
                 else if (!_stricmp(val, "cheaper")) g_enf_mode = kEnfCheaper;
                 else g_enf_mode = kEnfTarget;
+            } else if (!_stricmp(key, "preset")) {
+                if (!_stricmp(val, "quality")) g_preset = profile::Preset::Quality;
+                else if (!_stricmp(val, "potato")) g_preset = profile::Preset::Potato;
+                else g_preset = profile::Preset::Balanced;
             } else if (!_stricmp(key, "unknown_build")) {
                 g_unknown_build_off = !_stricmp(val, "off") || !_stricmp(val, "disable");
             } else if (!_stricmp(key, "status_popup")) {
@@ -603,6 +652,11 @@ bool LookupEnforce(const char* name, int* value, int* disable) {
             return true;
         }
     }
+    if (const PresetEnf* pe = FindPresetEnf(name)) {
+        if (value) *value = (int)pe->value;
+        if (disable) *disable = 0;
+        return true;
+    }
     return false;
 }
 
@@ -620,7 +674,30 @@ bool LookupEnforceFloat(const char* name, float* value, int* disable) {
         if (disable) *disable = g_enfov[i].disable;
         return true;
     }
+    if (const PresetEnf* pe = FindPresetEnf(name)) {
+        if (value) *value = pe->value;
+        if (disable) *disable = 0;
+        return true;
+    }
     return false;
+}
+
+profile::Preset GetPreset() { return g_preset; }
+
+bool StockMode() {
+    if (!g_exe_dir[0]) return false;
+    wchar_t path[MAX_PATH];
+    _snwprintf(path, MAX_PATH, L"%s\\f125_ab_stock.txt", g_exe_dir);
+    return GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
+}
+
+bool SetStockMode(bool on) {
+    if (!g_exe_dir[0]) return false;
+    wchar_t path[MAX_PATH];
+    _snwprintf(path, MAX_PATH, L"%s\\f125_ab_stock.txt", g_exe_dir);
+    if (!on) return DeleteFileW(path) || GetLastError() == ERROR_FILE_NOT_FOUND;
+    const char msg[] = "A/B: F1 25 RE-Optimization starts in STOCK mode while this file exists.\r\n";
+    return WriteFileAtomic(path, msg, sizeof(msg) - 1);
 }
 
 const wchar_t* ExeDir() { return g_exe_dir; }
@@ -652,6 +729,20 @@ bool ApplyProfile() {
                docs);
     if (GetFileAttributesW(dst) == INVALID_FILE_ATTRIBUTES) {
         Note("profile: hardware_settings_config.xml not found - skipping");
+        return false;
+    }
+
+    if (StockMode()) {
+        // A/B stock run: put the untouched settings back so the game really
+        // runs stock, and leave everything else alone.
+        wchar_t bak[MAX_PATH] = {0};
+        _snwprintf(bak, MAX_PATH, L"%s.untuned", dst);
+        if (GetFileAttributesW(bak) != INVALID_FILE_ATTRIBUTES &&
+            CopyFileW(bak, dst, FALSE)) {
+            Note("A/B: STOCK mode - restored hardware_settings_config.xml.untuned");
+        } else {
+            Note("A/B: STOCK mode - no .untuned backup found, settings left as they are");
+        }
         return false;
     }
 
@@ -717,7 +808,30 @@ bool ApplyProfile() {
         Note("upscaler: unknown GPU - leaving your in-game upscaler unchanged");
     }
 
-    size_t n = profile::Transform(in, out, kCap, up);
+    {
+        char line[96];
+        _snprintf(line, sizeof(line), "preset: %s", profile::PresetName(g_preset));
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+    }
+    // Presets only add to the file, so switching e.g. Potato -> Balanced would
+    // leave Potato's extra cuts behind. When the preset changed since the last
+    // launch, start again from the untouched .untuned copy.
+    {
+        wchar_t last[MAX_PATH], bak[MAX_PATH];
+        _snwprintf(last, MAX_PATH, L"%s\\f125_last_preset.txt", g_exe_dir);
+        _snwprintf(bak, MAX_PATH, L"%s.untuned", dst);
+        char prev[32] = {0};
+        ReadFileAll(last, prev, sizeof(prev));
+        const char* cur = profile::PresetName(g_preset);
+        if (strncmp(prev, cur, strlen(cur)) != 0 || prev[strlen(cur)] != 0) {
+            if (prev[0] && ReadFileAll(bak, in, kCap)) {
+                Note("preset: changed since last launch - starting from the .untuned settings");
+            }
+            WriteFileAtomic(last, cur, strlen(cur));
+        }
+    }
+    size_t n = profile::Transform(in, out, kCap, up, g_preset);
     free(in);
     if (n == 0) {
         free(out);

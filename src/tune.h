@@ -43,6 +43,12 @@ bool LogReport();
 bool UnknownBuildOff();
 // [profile] status_popup = 1: show a short "mod loaded / error" banner at launch.
 bool StatusPopup();
+// [profile] preset = quality | balanced | potato.
+profile::Preset GetPreset();
+// A/B switch: while f125_ab_stock.txt exists next to the game, the next launch
+// runs fully stock (untouched settings restored, no in-engine hooks).
+bool StockMode();
+bool SetStockMode(bool on);
 
 // F125_FORCE_SCAN=1 ignores the known addresses and resolves every hook by
 // signature/name. Used to test the self-healing path against the current build.

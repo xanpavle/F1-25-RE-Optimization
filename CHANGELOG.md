@@ -5,6 +5,47 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-10-24
+
+**Presets, an installer preset menu and an A/B switch. The Balanced preset is
+the 0.2.9 tuning, unchanged.**
+
+### Added
+
+- **`[profile] preset = quality | balanced | potato`.**
+  - *Quality* (Ultra Max / Ultra High): Balanced plus ray-traced AO and DDGI,
+    grass, hair, 4096 world shadows, full SSAO/SSRT and 960×540 volumetric fog.
+    The in-engine enforcement allows the higher shadow, fog and crowd values.
+  - *Balanced* (High / Medium): the 0.2.9 delta, unchanged. Default.
+  - *Potato* (Low / Ultra Low): ray tracing off, shadows 1024 with 2 cascades,
+    fog 256×128 and off, no SSAO/SSRT/DOF/lens flare/motion blur, lower crowd,
+    particles, texture streaming and anisotropic filtering, no grass,
+    half-resolution planar reflections. Mirrors are untouched. The in-engine
+    enforcement uses matching low values, except the sky shadow cascade count:
+    forcing it below 4 in-engine makes the game quit at launch, so it stays at
+    the preset value.
+  - An explicit `[enforce]` line in the ini still overrides the preset.
+- **Installer preset menu.** `Install-F125-Tune.bat` asks 1) Quality,
+  2) Balanced, 3) Potato or 4) Recommended for your PC, and writes the choice
+  into `f125_tune.ini`. *Recommended* reads the graphics card name and prefers a
+  dedicated card over integrated graphics. `-Preset <name>` skips the question.
+- **A/B switch (Ctrl+F10).** Only while the game window is in front. It creates
+  or removes `f125_ab_stock.txt` next to the game. While that file exists, the
+  next launch restores the `.untuned` settings and installs no hooks, and the
+  banner shows *A/B: running STOCK*. The switch applies on the next launch
+  because the mod's settings are loaded at startup.
+- `presettest` checks each preset against a real Ultra settings file.
+
+### Changed
+
+- **Switching presets starts from the untouched settings.** The last preset is
+  stored in `f125_last_preset.txt`. When it differs, the delta is applied to the
+  `.untuned` copy instead of the current file.
+- The launch banner names the active preset ("loaded successfully - balanced
+  preset") and is wider.
+- `Uninstall` also removes `f125_ab_stock.txt` and `f125_last_preset.txt`.
+- Version bumped to `0.3.0`.
+
 ## [0.2.9] - 2026-10-24
 
 **Safety release: a game-build check, a hook engine that refuses unsafe patches,
