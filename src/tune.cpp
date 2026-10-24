@@ -51,6 +51,8 @@ char      g_log_prefix[64]  = {0};
 bool      g_profile_apply   = false;
 bool      g_want_guard      = true;
 char      g_upscaler_mode[16] = "auto";
+bool      g_unknown_build_off = false;
+bool      g_status_popup    = true;
 
 HMODULE   g_self = nullptr;
 wchar_t   g_exe_dir[MAX_PATH] = {0};
@@ -330,6 +332,10 @@ void ParseIni(const char* text) {
                 if (!_stricmp(val, "off") || !_stricmp(val, "none")) g_enf_mode = kEnfOff;
                 else if (!_stricmp(val, "cheaper")) g_enf_mode = kEnfCheaper;
                 else g_enf_mode = kEnfTarget;
+            } else if (!_stricmp(key, "unknown_build")) {
+                g_unknown_build_off = !_stricmp(val, "off") || !_stricmp(val, "disable");
+            } else if (!_stricmp(key, "status_popup")) {
+                if (ParseBoolStr(val, &b)) g_status_popup = b; else g_status_popup = atoi(val) != 0;
             }
         } else if (section == kUpscaler) {
             if (!_stricmp(key, "mode")) {
@@ -562,8 +568,16 @@ bool EnforceTarget() { return g_enf_mode != kEnfCheaper; }
 bool WantEnforceBools() { return g_enforce_bools; }
 bool LogAll()      { return g_log_all; }
 bool LogReport()   { return g_log_report; }
+bool UnknownBuildOff() { return g_unknown_build_off; }
+bool StatusPopup() { return g_status_popup; }
+
+static bool g_unknown_build = false;
+void SetUnknownBuild(bool unknown) { g_unknown_build = unknown; }
 
 bool ForceScan() {
+    // The known RVAs belong to one build; on any other build a generic
+    // prologue could match an unrelated function there, so always re-derive.
+    if (g_unknown_build) return true;
     static int cached = -1;
     if (cached < 0) {
         char v[16] = {0};

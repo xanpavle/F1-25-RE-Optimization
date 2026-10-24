@@ -14,7 +14,7 @@ echo Building with: %GCC%
 "%GCC%" -O2 -shared -static -static-libgcc ^
   -o "%OUT%\dinput8.dll" ^
   "%SRC%\proxy.cpp" "%SRC%\hook.cpp" "%SRC%\tune.cpp" "%SRC%\profile.cpp" "%SRC%\gpu.cpp" "%SRC%\scan.cpp" "%SRC%\enforce.cpp" ^
-  -luser32 -lkernel32 -lshell32 -ladvapi32
+  -luser32 -lkernel32 -lshell32 -ladvapi32 -lgdi32
 
 if errorlevel 1 (
   echo.

@@ -37,10 +37,19 @@ bool WantEnforceBools();
 bool LogAll();
 // [log] report = 1: write the hook-resolution report to the log.
 bool LogReport();
+// [profile] unknown_build = scan | off. On a game build other than the one the
+// addresses were taken from: `scan` re-derives every hook by signature (each one
+// is skipped if its prologue does not verify); `off` disables the whole mod.
+bool UnknownBuildOff();
+// [profile] status_popup = 1: show a short "mod loaded / error" banner at launch.
+bool StatusPopup();
 
 // F125_FORCE_SCAN=1 ignores the known addresses and resolves every hook by
 // signature/name. Used to test the self-healing path against the current build.
 bool ForceScan();
+// Set at startup when F1_25.exe is not the build the addresses came from;
+// makes ForceScan() true so no hard-coded address is trusted.
+void SetUnknownBuild(bool unknown);
 
 // Test seam: the GPU -> backend mapping without touching the ini or the OS.
 namespace testing {

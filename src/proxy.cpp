@@ -10,10 +10,12 @@
 #include <windows.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 #include "hook.h"
 #include "scan.h"
 #include "tune.h"
 #include "enforce.h"
+#include "version.h"
 
 // --- F1_25.exe (image base 0x140000000, no ASLR) -----------------------------
 // FUN_143a43b90: bool attribute getter  (node, name, uint8_t* out, uint8_t def)
@@ -114,6 +116,139 @@ static void InstallHooks() {
     if (g_orig_bool && g_orig_scalar) tune::Note("hooks installed OK");
 }
 
+// --- game build check -------------------------------------------------------
+// The hard-coded RVAs above and in enforce.cpp were taken from this build
+// (Steam 1.0.141.7865, SHA-256 d873a1c8...). Its PE header identifies it
+// without hashing the 400 MB file.
+static const uint32_t kKnownTimestamp   = 0x6AA3C898u;
+static const uint32_t kKnownSizeOfImage = 0x193E6000u;
+
+static bool IsKnownBuild(uint32_t* ts, uint32_t* size) {
+    const BYTE* base = (const BYTE*)GetModuleHandleW(nullptr);
+    const IMAGE_DOS_HEADER* dos = (const IMAGE_DOS_HEADER*)base;
+    const IMAGE_NT_HEADERS64* nt = (const IMAGE_NT_HEADERS64*)(base + dos->e_lfanew);
+    *ts = nt->FileHeader.TimeDateStamp;
+    *size = nt->OptionalHeader.SizeOfImage;
+    return *ts == kKnownTimestamp && *size == kKnownSizeOfImage;
+}
+
+// --- launch status banner ---------------------------------------------------
+// A small topmost, click-through, non-activating window in the top-left corner
+// for a few seconds at launch. It never takes focus and draws nothing into the
+// game itself; in exclusive fullscreen it may simply not be visible.
+static char     g_status[160];
+static COLORREF g_status_color;
+static const UINT kStatusMs = 8000;
+
+static LRESULT CALLBACK StatusProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
+    switch (m) {
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(w, &ps);
+        RECT rc;
+        GetClientRect(w, &rc);
+        HBRUSH bg = CreateSolidBrush(RGB(16, 16, 16));
+        FillRect(dc, &rc, bg);
+        DeleteObject(bg);
+        RECT bar = {0, 0, 6, rc.bottom};
+        HBRUSH accent = CreateSolidBrush(g_status_color);
+        FillRect(dc, &bar, accent);
+        DeleteObject(accent);
+        HFONT f = CreateFontA(20, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                              CLEARTYPE_QUALITY, 0, "Segoe UI");
+        HGDIOBJ old = SelectObject(dc, f);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(240, 240, 240));
+        rc.left += 18;
+        DrawTextA(dc, g_status, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
+        SelectObject(dc, old);
+        DeleteObject(f);
+        EndPaint(w, &ps);
+        return 0;
+    }
+    case WM_TIMER:
+        DestroyWindow(w);
+        return 0;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcA(w, m, wp, lp);
+}
+
+static DWORD WINAPI StatusThread(LPVOID) {
+    HINSTANCE inst = GetModuleHandleW(nullptr);
+    WNDCLASSA wc = {};
+    wc.lpfnWndProc = StatusProc;
+    wc.hInstance = inst;
+    wc.lpszClassName = "F125TuneStatus";
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    RegisterClassA(&wc);
+    HWND w = CreateWindowExA(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE |
+                                 WS_EX_LAYERED | WS_EX_TRANSPARENT,
+                             wc.lpszClassName, "", WS_POPUP, 24, 24, 640, 44, nullptr,
+                             nullptr, inst, nullptr);
+    if (!w) return 0;
+    SetLayeredWindowAttributes(w, 0, 230, LWA_ALPHA);
+    ShowWindow(w, SW_SHOWNOACTIVATE);
+    SetTimer(w, 1, kStatusMs, nullptr);
+    MSG msg;
+    while (GetMessageA(&msg, nullptr, 0, 0) > 0) DispatchMessageA(&msg);
+    UnregisterClassA(wc.lpszClassName, inst);
+    return 0;
+}
+
+static void ShowStatus(const char* text, COLORREF color) {
+    tune::Note(text);
+    if (!tune::StatusPopup()) return;
+    strncpy(g_status, text, sizeof(g_status) - 1);
+    g_status_color = color;
+    // A window cannot be created under the loader lock; use a thread.
+    HANDLE t = CreateThread(nullptr, 0, StatusThread, nullptr, 0, nullptr);
+    if (t) CloseHandle(t);
+}
+
+static void Startup() {
+    uint32_t ts = 0, size = 0;
+    const bool known = IsKnownBuild(&ts, &size);
+    char line[192];
+    _snprintf(line, sizeof(line),
+              known ? "build: F1_25.exe 1.0.141.7865 verified (timestamp %08X, image %08X)"
+                    : "build: UNKNOWN F1_25.exe (timestamp %08X, image %08X) - "
+                      "hard-coded addresses not trusted",
+              ts, size);
+    line[sizeof(line) - 1] = 0;
+    tune::Note(line);
+
+    if (!known && tune::UnknownBuildOff()) {
+        ShowStatus(F125_MOD_NAME " v" F125_MOD_VERSION
+                   " DISABLED - unsupported game version, game runs stock",
+                   RGB(220, 40, 40));
+        return;
+    }
+    tune::SetUnknownBuild(!known);
+
+    const bool profile = tune::ApplyProfile();
+    enforce::Init();
+    InstallHooks();
+
+    const bool hooks = g_orig_bool && g_orig_scalar;
+    if (hooks && enforce::Active() && profile) {
+        ShowStatus(known ? F125_MOD_NAME " v" F125_MOD_VERSION " loaded successfully"
+                         : F125_MOD_NAME " v" F125_MOD_VERSION
+                           " loaded (game updated - addresses re-derived)",
+                   RGB(40, 200, 90));
+    } else if (hooks || enforce::Active() || profile) {
+        ShowStatus(F125_MOD_NAME " v" F125_MOD_VERSION
+                   " loaded with warnings - see f125_tune.log",
+                   RGB(235, 170, 30));
+    } else {
+        ShowStatus(F125_MOD_NAME " v" F125_MOD_VERSION
+                   " ERROR - nothing applied, see f125_tune.log",
+                   RGB(220, 40, 40));
+    }
+}
+
 // --- dinput8 proxy ----------------------------------------------------------
 typedef HRESULT(WINAPI* DirectInput8Create_t)(HINSTANCE, DWORD, const GUID&, void**,
                                               void*);
@@ -145,9 +280,7 @@ BOOL WINAPI DllMain(HMODULE hMod, DWORD reason, LPVOID) {
         DisableThreadLibraryCalls(hMod);
         tune::SetSelf(hMod);
         tune::Init();
-        tune::ApplyProfile();
-        enforce::Init();
-        InstallHooks();
+        Startup();
     }
     return TRUE;
 }
