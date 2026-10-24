@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<hardware_settings_config applyOOTB="false">
+	<cpu name="AMD Ryzen 5 7600X 6-Core Processor" processors="12" processorStride="1" processorBinding="1" />
+	<graphics_card deviceId="0x747E">
+		<resolution width="2560" height="1440" displayMode="2" vsync="false" vsyncInterval="auto" frameRateLimiterEnabled="false" frameRateLimiterValue="120">
+			<refreshRate numerator="165" denominator="1" />
+			<windowPosition x="0" y="0" />
+			<outputMonitor index="1" />
+			<aspectRatio auto="true" width="0" height="0" />
+			<hdr mode="0" peakNits="1000" />
+		</resolution>
+	</graphics_card>
+	<motion>
+		<dbox enabled="true" />
+		<udp enabled="false" broadcast="false" ip="127.0.0.1" port="20777" sendRate="20" format="2026" yourTelemetry="restricted" onlineNames="off" />
+	</motion>
+	<antialiasing taa="false" cas="1" dlss="false" fsr3="1" xess="false" />
+	<aa_quality value="0" />
+	<aa_sharpness value="0.5" />
+	<frame_gen mode="3" />
+	<multi_frame_gen value="0" />
+	<dynamicresolution_enabled value="false" />
+	<dynamicresolution_target_fps value="0" />
+	<dynamicresolution_profile deltaDown="0.05" percentageDown="0.95" deltaUp="0.01" percentageUp="0.9" alpha="0.95" />
+	<dynamicresolution_min_scale value="0.5" />
+	<ssao enabled="true" algorithm="3" />
+	<ssrt enabled="true" quality="4" />
+	<texture_streaming sizeInMiB="2048" texelDensityBias="0.0" concurrentTextureSwaps="1" />
+	<led_display fanatecNativeSupport="true" sliProNativeSupport="false" sliProForceBrightness="127" wootingRGBEnabled="false" />
+	<anisotropic_filter level="16" />
+	<lighting quality="3" volumetricFog="true" volumetricFogMapWidth="1920" volumetricFogMapHeight="1080" />
+	<postprocess motionBlur="true" godRays="true" depthOfField="true" lensStreak="true" lensFlare="true" bloom="true" motionBlurV2="true" />
+	<shadows enabled="true" skyShadowMapSize="2048" skyShadowCascadeCount="4" skyShadowLowLod="false" worldShadowMapSize="4096" skyShadowMap32Bits="true" nightShadowMapSize="4096" nightShadowCharacterCast="true" nightShadowSourceCount="4" sampling="3" spotShadowMapSize="2048" spotShadowSampling="3" crowdInShadows="true" />
+	<particles enabled="true" distanceScale="1.0" rate="1.0" high="true" />
+	<crowd distanceScale="0.4" billboardDistance="4000" />
+	<vehicle_reflections envMapScale="2.0" envMapUpdateMode="alternate" envMapRenderMode="carsAndCharacters" cubeMapEnabled="true" cubeMapScale="2.0" cubeMapUpdateMode="all" />
+	<mirrors mirrorsUpdateMode="both" mirrorsRenderMode="carsAndCharacters" treesInMirrors="true" crowdInMirrors="true" highDetailMirrors="true" highDetailTyresAndCar="true" particlesInMirrors="true" />
+	<weather_effects rainSplashes="true" rainSheets="true" rainBeads="true" rainHigh="true" trackHeatHaze="true" planarReflectionsEnabled="true" planarReflectionsHQEnabled="true" planarReflectionsRangeScale="3.0" planarReflectionsRTScale="1.0" planarReflectionsMipTailBlur="true" proceduralCloudRTScale="4.0" proceduralCloudTiling="7" proceduralCloudQuality="1" />
+	<ground_cover enabled="true" grassFlattening="true" drawDistance="120.0" meshes="true" />
+	<trees useLOD0="true" distanceScale="0.2" />
+	<hair enabled="true" />
+	<skidmarks enabled="true" parallax="true" />
+	<skidmarks_blending enabled="true" />
+	<audio audioUpdateRate="2" num_job_worker_threads="12" />
+	<async_compute enabled="true" />
+	<cs_culling enabled="false" />
+	<vendor_shader_pack enabled="true" />
+	<replay_directory path="" />
+	<rt_pathtrace enabled="false" />
+	<rt_ray_reconstruction enabled="false" />
+	<rt_shadows enabled="true" />
+	<rt_reflections enabled="true" />
+	<rt_transparent_reflections enabled="true" />
+	<rt_ao enabled="true" />
+	<rt_ddgi enabled="true" />
+	<rt_version version="0" />
+	<vrs enabled="true" />
+	<reflex mode="1" />
+	<ser enabled="false" />
+	<ca enabled="false" />
+</hardware_settings_config>

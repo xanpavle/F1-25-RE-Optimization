@@ -1,4 +1,4 @@
-// F1 25 renderer mod — proxy dinput8.dll.
+﻿// F1 25 renderer mod â€” proxy dinput8.dll.
 //
 // The game imports exactly one symbol from dinput8.dll (DirectInput8Create), so
 // we can transparently proxy the system DLL and run our own code at process
@@ -186,7 +186,7 @@ static DWORD WINAPI StatusThread(LPVOID) {
     RegisterClassA(&wc);
     HWND w = CreateWindowExA(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE |
                                  WS_EX_LAYERED | WS_EX_TRANSPARENT,
-                             wc.lpszClassName, "", WS_POPUP, 24, 24, 640, 44, nullptr,
+                             wc.lpszClassName, "", WS_POPUP, 24, 24, 820, 44, nullptr,
                              nullptr, inst, nullptr);
     if (!w) return 0;
     SetLayeredWindowAttributes(w, 0, 230, LWA_ALPHA);
@@ -208,7 +208,47 @@ static void ShowStatus(const char* text, COLORREF color) {
     if (t) CloseHandle(t);
 }
 
+// --- A/B hotkey ---------------------------------------------------------------
+// Ctrl+F10 (only while the game window is in front) flips the A/B switch file.
+// Almost all of the mod's effect is loaded once at launch, so the switch takes
+// effect on the next launch; the banner says so.
+static DWORD WINAPI HotkeyThread(LPVOID) {
+    bool was_down = false;
+    for (;;) {
+        Sleep(50);
+        HWND fg = GetForegroundWindow();
+        DWORD pid = 0;
+        if (fg) GetWindowThreadProcessId(fg, &pid);
+        const bool down = pid == GetCurrentProcessId() &&
+                          (GetAsyncKeyState(VK_CONTROL) & 0x8000) &&
+                          (GetAsyncKeyState(VK_F10) & 0x8000);
+        if (down && !was_down) {
+            const bool to_stock = !tune::StockMode();
+            if (tune::SetStockMode(to_stock)) {
+                ShowStatus(to_stock ? "A/B: STOCK settings on next launch (Ctrl+F10 to undo)"
+                                    : "A/B: MOD settings on next launch (Ctrl+F10 to undo)",
+                           to_stock ? RGB(235, 170, 30) : RGB(40, 200, 90));
+            } else {
+                ShowStatus("A/B: could not write the switch file - see f125_tune.log",
+                           RGB(220, 40, 40));
+            }
+        }
+        was_down = down;
+    }
+}
+
 static void Startup() {
+    HANDLE hk = CreateThread(nullptr, 0, HotkeyThread, nullptr, 0, nullptr);
+    if (hk) CloseHandle(hk);
+
+    if (tune::StockMode()) {
+        tune::ApplyProfile();  // restores the untouched settings in stock mode
+        ShowStatus(F125_MOD_NAME " v" F125_MOD_VERSION
+                   " A/B: running STOCK - Ctrl+F10 for mod on next launch",
+                   RGB(235, 170, 30));
+        return;
+    }
+
     uint32_t ts = 0, size = 0;
     const bool known = IsKnownBuild(&ts, &size);
     char line[192];
@@ -234,10 +274,13 @@ static void Startup() {
 
     const bool hooks = g_orig_bool && g_orig_scalar;
     if (hooks && enforce::Active() && profile) {
-        ShowStatus(known ? F125_MOD_NAME " v" F125_MOD_VERSION " loaded successfully"
-                         : F125_MOD_NAME " v" F125_MOD_VERSION
-                           " loaded (game updated - addresses re-derived)",
-                   RGB(40, 200, 90));
+        char msg[160];
+        _snprintf(msg, sizeof(msg), "%s v%s loaded successfully - %s preset%s",
+                  F125_MOD_NAME, F125_MOD_VERSION,
+                  profile::PresetName(tune::GetPreset()),
+                  known ? "" : " (game updated - addresses re-derived)");
+        msg[sizeof(msg) - 1] = 0;
+        ShowStatus(msg, RGB(40, 200, 90));
     } else if (hooks || enforce::Active() || profile) {
         ShowStatus(F125_MOD_NAME " v" F125_MOD_VERSION
                    " loaded with warnings - see f125_tune.log",
