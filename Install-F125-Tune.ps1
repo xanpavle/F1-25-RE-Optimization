@@ -11,12 +11,50 @@
 param(
     [ValidateSet('Install', 'Uninstall', 'Restore')]
     [string]$Action = 'Install',
-    [string]$Game = ''
+    [string]$Game = '',
+    [ValidateSet('', 'quality', 'balanced', 'potato', 'recommended')]
+    [string]$Preset = ''
 )
 
 $ErrorActionPreference = 'Stop'
 
 function Write-Step($msg) { Write-Host "  $msg" }
+
+# Picks a preset from the GPU name. Unknown GPUs get Balanced.
+function Get-RecommendedPreset {
+    $names = @()
+    try { $names = @(Get-CimInstance Win32_VideoController -ErrorAction Stop | ForEach-Object { $_.Name }) } catch { }
+    # Prefer a dedicated card over the CPU's integrated graphics.
+    $name = ($names | Where-Object { $_ -match 'RTX|GTX|RX\s*\d|Arc' } | Select-Object -First 1)
+    if (-not $name) { $name = ($names | Where-Object { $_ -match 'NVIDIA|AMD|Radeon|Intel' } | Select-Object -First 1) }
+    if (-not $name) { return @{ Preset = 'balanced'; Gpu = 'unknown GPU' } }
+    $p = 'balanced'
+    if ($name -match 'RTX\s*(4080|4090|5070\s*Ti|5080|5090)|RX\s*(7900|9070)') { $p = 'quality' }
+    elseif ($name -match 'GTX|RX\s*(4\d\d|5\d\d|5[0-9]{3})\b|RX\s*6(4|5)00|Vega|UHD|Iris|Radeon\(TM\)\s*Graphics|Radeon Graphics|MX\d') { $p = 'potato' }
+    return @{ Preset = $p; Gpu = $name }
+}
+
+function Select-Preset([string]$preset) {
+    $rec = Get-RecommendedPreset
+    if ($preset -eq 'recommended') { return $rec.Preset }
+    if ($preset) { return $preset }
+    Write-Host 'Choose a preset:' -ForegroundColor Cyan
+    Write-Host '  1) Quality   (for Ultra Max / Ultra High)  - keeps RT AO, DDGI, grass, sharp shadows'
+    Write-Host '  2) Balanced  (for High / Medium)           - the original tuning, same look, more FPS'
+    Write-Host '  3) Potato    (for Low / Ultra Low)          - lowest settings, ray tracing off, max FPS'
+    Write-Host "  4) Recommended for your PC                  - $($rec.Gpu) -> $($rec.Preset)"
+    Write-Host ''
+    while ($true) {
+        $c = Read-Host 'Type 1, 2, 3 or 4 and press Enter'
+        switch ($c.Trim()) {
+            '1' { return 'quality' }
+            '2' { return 'balanced' }
+            '3' { return 'potato' }
+            '4' { return $rec.Preset }
+        }
+        Write-Host '  Please type 1, 2, 3 or 4.' -ForegroundColor Yellow
+    }
+}
 
 function Test-GameDir([string]$p) {
     if ([string]::IsNullOrWhiteSpace($p)) { return $false }
@@ -150,7 +188,11 @@ switch ($Action) {
             }
 
             Copy-Item $dll $targetDll -Force
-            Copy-Item $ini $targetIni -Force
+            $chosen = Select-Preset $Preset
+            $text = Get-Content $ini -Raw
+            $text = [regex]::Replace($text, '(?m)^preset\s*=.*$', "preset = $chosen")
+            Set-Content -Path $targetIni -Value $text -NoNewline -Encoding ascii
+            Write-Step "preset: $chosen"
         } catch {
             Write-Host ''
             Write-Host 'ERROR: could not write to the game folder.' -ForegroundColor Red
@@ -166,18 +208,21 @@ switch ($Action) {
         Write-Host 'Next:'
         Write-Host '  1) Launch F1 25 offline (single-player).'
         Write-Host "  2) Open $game\f125_tune.log - it should contain"
-        Write-Host '       [mod] F1 25 RE-Optimization v0.2.9'
+        Write-Host '       [mod] F1 25 RE-Optimization v0.3.0'
+        Write-Host '       [mod] preset: ...'
         Write-Host '       [mod] hooks installed OK'
         Write-Host '       [mod] GPU: ...'
         Write-Host '       [mod] upscaler: mode=auto -> ...'
-        Write-Host '  3) Online play: run Uninstall-F125-Tune.bat first.'
+        Write-Host '  3) In game, Ctrl+F10 switches stock / mod for the NEXT launch (A/B test).'
+        Write-Host '  4) Change preset later: run this installer again, or edit preset = in f125_tune.ini.'
+        Write-Host '  5) Online play: run Uninstall-F125-Tune.bat first.'
         Write-Host ''
     }
 
     'Uninstall' {
         $removed = 0
         try {
-            foreach ($f in @('dinput8.dll', 'f125_tune.ini', 'f125_tune.log')) {
+            foreach ($f in @('dinput8.dll', 'f125_tune.ini', 'f125_tune.log', 'f125_ab_stock.txt', 'f125_last_preset.txt')) {
                 $p = Join-Path $game $f
                 if (Test-Path $p) {
                     Remove-Item $p -Force

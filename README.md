@@ -4,7 +4,7 @@ A runtime renderer optimisation for **F1 25** (EGO engine, Codemasters / EA), bu
 by reverse-engineering the shipped executable. It makes the renderer do **less work
 for the same look** — no `F1_25.exe` bytes are patched on disk.
 
-**v0.2.9** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
+**v0.3.0** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
 
 Built and tested on a single machine, offline, single-player.
 
@@ -68,6 +68,37 @@ raster/RT delta adds the rest. Numbers are from a single machine and will vary.
 > with `benchmark\Benchmark_*.xml` on your own machine.
 
 ---
+
+## What changed in v0.3.0
+
+**Three presets, an installer menu, and an A/B switch.** The headline numbers
+above are unchanged (they are the Balanced preset).
+
+- **Presets.** The installer now asks which one you want:
+
+  ```
+  Choose a preset:
+    1) Quality   (for Ultra Max / Ultra High)  - keeps RT AO, DDGI, grass, sharp shadows
+    2) Balanced  (for High / Medium)           - the original tuning, same look, more FPS
+    3) Potato    (for Low / Ultra Low)          - lowest settings, ray tracing off, max FPS
+    4) Recommended for your PC                  - picked from your graphics card
+  ```
+
+  | Preset | What it does |
+  |---|---|
+  | **Quality** | Balanced, but ray-traced AO and DDGI, grass, hair, 4096 shadows, full SSAO/SSRT and sharper fog stay on. |
+  | **Balanced** | The original tuning from 0.2.x. Same look, much less work. |
+  | **Potato** | Everything that costs real GPU time is cut, ray tracing included: shadows 1024, fog 256×128, no SSAO/SSRT/DOF, low crowd and particles, no grass. Mirrors are never touched. |
+
+  "Recommended" uses your graphics card: RTX 4080/4090/5070 Ti and up and RX 7900 /
+  9070 → Quality; GTX, RX 400–5000, RX 6400/6500 and integrated graphics → Potato;
+  everything else → Balanced. Change it later by running the installer again or by
+  editing `preset =` in `f125_tune.ini`. The launch banner shows the active preset.
+- **A/B switch: Ctrl+F10.** In game, Ctrl+F10 switches between **stock** and
+  **mod** settings for the **next launch**. Most of the mod's effect is loaded once at
+  startup, so it can't switch mid-race. A stock launch puts your untouched original
+  settings back (`.untuned`) and installs no hooks; the banner says
+  *A/B: running STOCK*. Press Ctrl+F10 again to go back to the mod.
 
 ## What changed in v0.2.9
 
@@ -353,6 +384,11 @@ It copies `dinput8.dll` (from `build\` if you built it, otherwise `prebuilt\`) a
 
 **Manual:** copy `prebuilt\dinput8.dll` and `f125_tune.ini` next to `F1_25.exe`.
 
+The installer asks for a preset (Quality / Balanced / Potato / Recommended for your
+PC) and writes it into `f125_tune.ini`. To skip the question:
+`powershell -ExecutionPolicy Bypass -File Install-F125-Tune.ps1 -Preset balanced`
+(`quality`, `balanced`, `potato` or `recommended`).
+
 Then:
 
 1. Launch F1 25 **offline**.
@@ -394,6 +430,12 @@ Convenience scripts:
   its canonical values when you apply a preset. From `v0.2.0` the tuned values are
   already enforced in-engine, and the file delta is restored after the menu closes, so
   this is no longer destructive — but a clean run is still the most comparable one.
+- **Presets:** `[profile] preset = quality | balanced | potato`. A change applies on
+  the next launch and starts from your untouched `.untuned` settings, so switching
+  presets never leaves the previous one's cuts behind.
+- **A/B test:** Ctrl+F10 in game switches stock / mod for the next launch.
+- **Uninstalling:** the tuned values stay in your settings file until you run
+  `Restore-F125-Tune.bat`. Removing only the DLL is *not* the same as stock.
 - **Offline only.** Remove the DLL before playing online.
 - **Upscaler:** `[upscaler] mode = auto` picks DLSS / FSR 3 / XeSS for your GPU
   and leaves your quality level alone. Force one with `dlss`, `fsr3`, `xess`,
