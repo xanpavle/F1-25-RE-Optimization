@@ -149,10 +149,10 @@ a second.
 
 ## Did it actually work?
 
-Open `f125_tune.log` in the game folder. A healthy v0.3.0 launch looks like:
+Open `f125_tune.log` in the game folder. A healthy v0.3.0.5 launch looks like:
 
 ```
-[mod] F1 25 RE-Optimization v0.3.0
+[mod] F1 25 RE-Optimization v0.3.0.5
 [mod] build: F1_25.exe 1.0.141.7865 verified (timestamp 6AA3C898, image 193E6000)
 [mod] preset: balanced
 [mod] session: exe=...\F1_25.exe (408063872 bytes)

@@ -237,7 +237,28 @@ static DWORD WINAPI HotkeyThread(LPVOID) {
     }
 }
 
+// Swofty Launcher installs its loader (version.dll) and swofty\settings.json
+// into the game folder for a modded session. It ships its own port of this mod,
+// and it times its addon loading on the game's first window, so running this
+// DLL beside it (our banner is a window) loads its addons too early and crashes
+// career loading. Step aside completely: no hooks, no banner, no profile write.
+static bool SwoftyActive() {
+    const wchar_t* dir = tune::ExeDir();
+    if (!dir || !dir[0]) return false;
+    wchar_t path[MAX_PATH];
+    _snwprintf(path, MAX_PATH, L"%s\\swofty\\settings.json", dir);
+    path[MAX_PATH - 1] = 0;
+    return GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES ||
+           GetModuleHandleW(L"swofty_core.dll") != nullptr;
+}
+
 static void Startup() {
+    if (SwoftyActive()) {
+        tune::Note("Swofty Launcher session detected - standalone mod disabled for this launch "
+                   "(use the RE-Optimization addon in Swofty Launcher instead)");
+        return;
+    }
+
     HANDLE hk = CreateThread(nullptr, 0, HotkeyThread, nullptr, 0, nullptr);
     if (hk) CloseHandle(hk);
 

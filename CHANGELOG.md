@@ -5,6 +5,27 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.3.0.5] - 2026-10-24
+
+**Crash fix for players who also use Swofty Launcher. No change otherwise.**
+
+### Fixed
+
+- **Crash in career loading (`Career_Load_DepartmentEntries`) when the
+  standalone mod and Swofty Launcher ran in the same session.** Swofty Launcher
+  starts loading its addons when the game shows its first window if its normal
+  trigger has not fired yet. The standalone launch banner is a window, so its
+  appearance made Swofty load every addon too early, and the career data addons
+  crashed. The standalone mod now checks for a Swofty session
+  (`<game>\swofty\settings.json`, or `swofty_core.dll` already loaded) and,
+  when it finds one, installs nothing: no hooks, no banner, no profile write,
+  no hotkey. It logs `Swofty Launcher session detected - standalone mod
+  disabled for this launch`.
+
+### Changed
+
+- Version bumped to `0.3.0.5` in the DLL, installer output and docs.
+
 ## [0.3.0] - 2026-10-24
 
 **Presets, an installer preset menu and an A/B switch. The Balanced preset is

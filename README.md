@@ -4,7 +4,7 @@ A runtime renderer optimisation for **F1 25** (EGO engine, Codemasters / EA), bu
 by reverse-engineering the shipped executable. It makes the renderer do **less work
 for the same look** — no `F1_25.exe` bytes are patched on disk.
 
-**v0.3.0** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
+**v0.3.0.5** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
 
 Built and tested on a single machine, offline, single-player.
 
@@ -68,6 +68,22 @@ raster/RT delta adds the rest. Numbers are from a single machine and will vary.
 > with `benchmark\Benchmark_*.xml` on your own machine.
 
 ---
+
+## What changed in v0.3.0.5
+
+A crash fix for players who **also use Swofty Launcher**. Nothing changes if you
+don't use it.
+
+- **Fixed: crash in career loading when the standalone mod and Swofty Launcher
+  ran together.** Swofty loads its addons when the game opens its first window,
+  and the standalone mod's launch banner is a window, so Swofty loaded every
+  addon too early and the career addons crashed the game. The standalone mod
+  now detects a Swofty session (`swofty\settings.json` in the game folder) and
+  turns itself off for that launch: no banner, no hooks, no settings changes.
+  The log says *Swofty Launcher session detected - standalone mod disabled*.
+- If you play through Swofty, use the **RE-Optimization addon** in Swofty
+  Launcher and pick the preset there. The standalone banner's preset (from
+  `f125_tune.ini`) does not apply to Swofty sessions.
 
 ## What changed in v0.3.0
 
@@ -584,4 +600,4 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
 MIT — see [LICENSE](LICENSE). Provided "as is", without warranty; see the disclaimer
 above.
 
-Version **0.3.0** - changes in [CHANGELOG.md](CHANGELOG.md).
+Version **0.3.0.5** - changes in [CHANGELOG.md](CHANGELOG.md).
