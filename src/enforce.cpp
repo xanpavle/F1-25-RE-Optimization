@@ -1072,6 +1072,14 @@ static void* PatchAt(uintptr_t va, const char* pro, size_t n, void* detour) {
         return nullptr;
     }
     if (!MatchPrologue(va, pro)) return nullptr;
+    char why[64];
+    if (!hook::SafeToRelocate(target, (int)n, why)) {
+        char line[160];
+        _snprintf(line, sizeof(line), "hook: prologue not relocatable (%s) - skipped", why);
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+        return nullptr;
+    }
     return hook::Install(target, detour, (int)n);
 }
 

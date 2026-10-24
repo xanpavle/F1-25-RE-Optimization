@@ -5,6 +5,39 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.2.9] - 2026-10-24
+
+**Safety release: a game-build check, a hook engine that refuses unsafe patches,
+and a launch status banner. The shipped look and tuning are unchanged.**
+
+### Added
+
+- **Game build check.** The PE header of `F1_25.exe` (TimeDateStamp `6AA3C898`,
+  SizeOfImage `193E6000`) identifies build 1.0.141.7865. The result is logged
+  as `build: ... verified` or `build: UNKNOWN ...`. On an unknown build the
+  known RVAs are never trusted: every hook is resolved by signature, as with
+  `f125_force_scan.txt`.
+- **`[profile] unknown_build = scan | off`.** `scan` (default) re-derives the
+  hooks on an updated game; `off` disables the whole mod (no profile rewrite,
+  no hooks) and shows a red *DISABLED* banner.
+- **Launch status banner** (`[profile] status_popup = 1`). For 8 seconds at
+  launch it shows *loaded successfully*, *loaded with warnings* or
+  *ERROR / DISABLED*. The window is topmost, click-through and never takes
+  focus.
+- `hooktest` cases for the real game prologues plus a split instruction, a
+  RIP-relative operand and a branch.
+
+### Changed
+
+- **`hook::Install` validates the bytes it relocates.** A small x64 decoder
+  (`hook::SafeToRelocate`) checks that `patch_len` ends on an instruction
+  boundary and that the copied prologue has no branch and no RIP-relative
+  operand. Otherwise nothing is patched, and `enforce` logs
+  `hook: prologue not relocatable (...) - skipped`.
+- `hook.h` now describes the jump that is actually emitted (14-byte `FF 25`
+  absolute, not `E9`).
+- Version bumped to `0.2.9` in the DLL, installer output and docs.
+
 ## [0.2.8] - 2026-10-23
 
 **Imola barrier fix: the lowered world-instance caps are removed. Nothing else
