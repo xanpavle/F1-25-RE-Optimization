@@ -252,6 +252,13 @@ static bool SwoftyActive() {
            GetModuleHandleW(L"swofty_core.dll") != nullptr;
 }
 
+// A crash or forced quit never gets here, so the next launch knows it failed.
+static DWORD WINAPI ConfirmThread(LPVOID) {
+    Sleep(90 * 1000);
+    tune::ConfirmLaunch("90 s without a crash");
+    return 0;
+}
+
 static void Startup() {
     if (SwoftyActive()) {
         tune::Note("Swofty Launcher session detected - standalone mod disabled for this launch "
@@ -261,6 +268,19 @@ static void Startup() {
 
     HANDLE hk = CreateThread(nullptr, 0, HotkeyThread, nullptr, 0, nullptr);
     if (hk) CloseHandle(hk);
+
+    // Crash safe mode: decide before anything is installed, then confirm the
+    // launch once the game has stayed up for 90 s (or exits cleanly).
+    const bool safe = tune::CrashGuardStart();
+    HANDLE ct = CreateThread(nullptr, 0, ConfirmThread, nullptr, 0, nullptr);
+    if (ct) CloseHandle(ct);
+    if (safe) {
+        tune::RestoreStockSettings("crash safe mode: STOCK launch");
+        ShowStatus(F125_MOD_NAME " v" F125_MOD_VERSION
+                   " SAFE MODE: running stock after a crash - see f125_tune.log",
+                   RGB(235, 170, 30));
+        return;
+    }
 
     if (tune::StockMode()) {
         tune::ApplyProfile();  // restores the untouched settings in stock mode
@@ -345,6 +365,9 @@ BOOL WINAPI DllMain(HMODULE hMod, DWORD reason, LPVOID) {
         tune::SetSelf(hMod);
         tune::Init();
         Startup();
+    } else if (reason == DLL_PROCESS_DETACH) {
+        // ExitProcess (a normal quit) runs this; a crash does not.
+        tune::ConfirmLaunch(nullptr);
     }
     return TRUE;
 }

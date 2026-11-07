@@ -7,6 +7,7 @@ Short answers first, details below.
 | Is it safe? | It is a normal Win32 DLL that rewrites one settings file. Source is public. |
 | Can I play online with it? | **No.** Offline / single-player only. |
 | Does it work on my GPU? | Yes, on any DX12 GPU — it picks DLSS / FSR 3 / XeSS / TAA for you. |
+| It crashed once - now it runs stock? | Crash safe mode (0.3.2): after a crash the next launch runs stock once. See the log. |
 | Do I lose visual quality? | The expensive-but-soft parts are reduced (fog resolution, shadow map size, god rays). Preset and resolution stay yours. |
 | Why is my FPS not higher? | It is a quality-for-FPS trade; the ceiling is your preset/CPU. See below. |
 | Does it survive a game update? | Not automatically yet — the hooks fail safe and need new addresses. |
@@ -69,7 +70,7 @@ chosen automatically:
 | NVIDIA GTX 10 / 16 | **FSR 3** | no DLSS hardware; FSR 3 runs on anything |
 | AMD Radeon (RX 4000–9000) | **FSR 3** | native path |
 | Intel Arc A / B | **XeSS** | best on Arc |
-| Intel iGPU | **FSR 3** | XeSS would be too heavy |
+| Integrated graphics (Intel Iris Xe / UHD, Radeon APU) | unchanged | since 0.3.2: an upscaler pass costs more than it saves there |
 | Unknown / VM | unchanged | the mod leaves your in-game choice alone |
 
 The **quality level** (Quality / Balanced / Performance) is never changed — it
@@ -149,10 +150,12 @@ a second.
 
 ## Did it actually work?
 
-Open `f125_tune.log` in the game folder. A healthy v0.3.0.5 launch looks like:
+Open `f125_tune.log` in the game folder. A healthy v0.3.2 launch looks like:
 
 ```
-[mod] F1 25 RE-Optimization v0.3.0.5
+[mod] F1 25 RE-Optimization v0.3.2
+[mod] header: GPU AMD Radeon RX 7800 XT | vendor AMD | integrated no | VRAM 16368 MB | low-VRAM guard off
+[mod] header: preset recommended -> balanced | enforce cheaper (raise never) | upscaler auto -> FSR 3 | crash safe mode on
 [mod] build: F1_25.exe 1.0.141.7865 verified (timestamp 6AA3C898, image 193E6000)
 [mod] preset: balanced
 [mod] session: exe=...\F1_25.exe (408063872 bytes)

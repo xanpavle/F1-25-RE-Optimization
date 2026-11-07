@@ -35,14 +35,16 @@ function Get-RecommendedPreset {
 }
 
 function Select-Preset([string]$preset) {
-    $rec = Get-RecommendedPreset
-    if ($preset -eq 'recommended') { return $rec.Preset }
+    # "recommended" is written as-is: the mod picks the preset from the GPU (and its
+    # VRAM) at every launch and logs the choice.
     if ($preset) { return $preset }
+    $rec = Get-RecommendedPreset
     Write-Host 'Choose a preset:' -ForegroundColor Cyan
     Write-Host '  1) Quality   (for Ultra Max / Ultra High)  - keeps RT AO, DDGI, grass, sharp shadows'
     Write-Host '  2) Balanced  (for High / Medium)           - the original tuning, same look, more FPS'
     Write-Host '  3) Potato    (for Low / Ultra Low)          - lowest settings, ray tracing off, max FPS'
-    Write-Host "  4) Recommended for your PC                  - $($rec.Gpu) -> $($rec.Preset)"
+    Write-Host "  4) Recommended for your PC                  - picked at launch ($($rec.Gpu): likely $($rec.Preset))"
+    Write-Host '  No preset raises a setting above your own in-game choice.'
     Write-Host ''
     while ($true) {
         $c = Read-Host 'Type 1, 2, 3 or 4 and press Enter'
@@ -50,7 +52,7 @@ function Select-Preset([string]$preset) {
             '1' { return 'quality' }
             '2' { return 'balanced' }
             '3' { return 'potato' }
-            '4' { return $rec.Preset }
+            '4' { return 'recommended' }
         }
         Write-Host '  Please type 1, 2, 3 or 4.' -ForegroundColor Yellow
     }
@@ -208,11 +210,11 @@ switch ($Action) {
         Write-Host 'Next:'
         Write-Host '  1) Launch F1 25 offline (single-player).'
         Write-Host "  2) Open $game\f125_tune.log - it should contain"
-        Write-Host '       [mod] F1 25 RE-Optimization v0.3.0.5'
+        Write-Host '       [mod] F1 25 RE-Optimization v0.3.2'
+        Write-Host '       [mod] header: GPU ... | VRAM ...'
         Write-Host '       [mod] preset: ...'
         Write-Host '       [mod] hooks installed OK'
-        Write-Host '       [mod] GPU: ...'
-        Write-Host '       [mod] upscaler: mode=auto -> ...'
+        Write-Host '  If a launch crashes, the next one runs stock once (crash safe mode); the log says why.'
         Write-Host '  3) In game, Ctrl+F10 switches stock / mod for the NEXT launch (A/B test).'
         Write-Host '  4) Change preset later: run this installer again, or edit preset = in f125_tune.ini.'
         Write-Host '  5) Online play: run Uninstall-F125-Tune.bat first.'
@@ -222,7 +224,7 @@ switch ($Action) {
     'Uninstall' {
         $removed = 0
         try {
-            foreach ($f in @('dinput8.dll', 'f125_tune.ini', 'f125_tune.log', 'f125_ab_stock.txt', 'f125_last_preset.txt')) {
+            foreach ($f in @('dinput8.dll', 'f125_tune.ini', 'f125_tune.log', 'f125_ab_stock.txt', 'f125_last_preset.txt', 'f125_launch_state.txt')) {
                 $p = Join-Path $game $f
                 if (Test-Path $p) {
                     Remove-Item $p -Force

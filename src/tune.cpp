@@ -53,6 +53,11 @@ bool      g_want_guard      = true;
 char      g_upscaler_mode[16] = "auto";
 bool      g_unknown_build_off = false;
 profile::Preset g_preset    = profile::Preset::Balanced;
+bool      g_preset_recommended = true;
+bool      g_crash_guard     = true;
+gpu::Info g_gpu             = {};
+bool      g_gpu_ready       = false;
+bool      g_header_done     = false;
 
 // Per-preset defaults for the in-engine enforcement table. An explicit
 // [enforce] line in the ini always wins over these.
@@ -79,7 +84,8 @@ const PresetEnf kPotatoEnf[] = {
     {"volumetricFogMapWidth", 256}, {"volumetricFogMapHeight", 128},
     {"billboardDistance", 1000},  {"textureStreamingMiB", 1024},
     {"groundCover.drawDistance", 40.0f},
-    {"proceduralCloudRTScale", 4.0f},
+    // 0.3.2: was 4.0 (the Ultra value), which made Potato heavier than Balanced.
+    {"proceduralCloudRTScale", 1.0f},
 };
 
 const PresetEnf* FindPresetEnf(const char* name) {
@@ -378,9 +384,12 @@ void ParseIni(const char* text) {
                 else if (!_stricmp(val, "cheaper")) g_enf_mode = kEnfCheaper;
                 else g_enf_mode = kEnfTarget;
             } else if (!_stricmp(key, "preset")) {
+                g_preset_recommended = !_stricmp(val, "recommended") || !_stricmp(val, "auto");
                 if (!_stricmp(val, "quality")) g_preset = profile::Preset::Quality;
                 else if (!_stricmp(val, "potato")) g_preset = profile::Preset::Potato;
                 else g_preset = profile::Preset::Balanced;
+            } else if (!_stricmp(key, "crash_safe_mode")) {
+                if (ParseBoolStr(val, &b)) g_crash_guard = b; else g_crash_guard = atoi(val) != 0;
             } else if (!_stricmp(key, "unknown_build")) {
                 g_unknown_build_off = !_stricmp(val, "off") || !_stricmp(val, "disable");
             } else if (!_stricmp(key, "status_popup")) {
@@ -463,6 +472,9 @@ profile::Upscaler ChooseUpscalerFor(const gpu::Info& g, const char* mode) {
     if (!_stricmp(m, "fsr3") || !_stricmp(m, "fsr")) return profile::Upscaler::Fsr3;
     if (!_stricmp(m, "xess")) return profile::Upscaler::Xess;
 
+    // 0.3.2: on integrated graphics an upscaler pass costs a large share of the
+    // frame, so auto leaves the player's in-game choice alone.
+    if (g.integrated) return profile::Upscaler::Keep;
     switch (g.vendor) {
         case gpu::VendorNvidia:
             return g.supportsDlss ? profile::Upscaler::Dlss : profile::Upscaler::Fsr3;
@@ -538,6 +550,10 @@ void Init() {
 
     ParseIni(buf);
     BuildIndex();
+
+    g_gpu = gpu::Detect();
+    g_gpu_ready = true;
+    if (g_preset_recommended) g_preset = gpu::Recommend(g_gpu);
 
     _snwprintf(g_log_path, MAX_PATH, L"%s\\f125_tune.log", exe);
     ResetLog();
@@ -733,16 +749,9 @@ bool ApplyProfile() {
     }
 
     if (StockMode()) {
-        // A/B stock run: put the untouched settings back so the game really
+        // A/B stock run: put the player's own values back so the game really
         // runs stock, and leave everything else alone.
-        wchar_t bak[MAX_PATH] = {0};
-        _snwprintf(bak, MAX_PATH, L"%s.untuned", dst);
-        if (GetFileAttributesW(bak) != INVALID_FILE_ATTRIBUTES &&
-            CopyFileW(bak, dst, FALSE)) {
-            Note("A/B: STOCK mode - restored hardware_settings_config.xml.untuned");
-        } else {
-            Note("A/B: STOCK mode - no .untuned backup found, settings left as they are");
-        }
+        RestoreStockSettings("A/B: STOCK mode");
         return false;
     }
 
@@ -778,22 +787,71 @@ bool ApplyProfile() {
         }
     }
 
-    const gpu::Info g = gpu::Detect();
+    const gpu::Info& g = Gpu();
     const profile::Upscaler up = ChooseUpscaler(g);
+    const bool first = !g_header_done;
+    g_header_done = true;
 
-    char gpuLine[224];
-    if (g.vendor != gpu::VendorUnknown) {
-        char series[32] = "";
-        if (g.series > 0) {
-            _snprintf(series, sizeof(series), " %d-series", g.series);
+    if (first) {
+        char line[320];
+        char vram[24];
+        if (g.vramMb) _snprintf(vram, sizeof(vram), "%u MB", g.vramMb);
+        else _snprintf(vram, sizeof(vram), "unknown");
+        vram[sizeof(vram) - 1] = 0;
+        _snprintf(line, sizeof(line),
+                  "header: GPU %s | vendor %s | integrated %s | VRAM %s | low-VRAM guard %s",
+                  g.vendor != gpu::VendorUnknown ? g.name : "not detected",
+                  gpu::VendorName(g.vendor), g.integrated ? "yes" : "no", vram,
+                  LowVram() ? "on" : "off");
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+        _snprintf(line, sizeof(line),
+                  "header: preset %s -> %s | enforce %s (raise %s) | upscaler %s -> %s | "
+                  "crash safe mode %s",
+                  g_preset_recommended ? "recommended" : profile::PresetName(g_preset),
+                  profile::PresetName(g_preset),
+                  g_enf_mode == kEnfOff ? "off" : g_enf_mode == kEnfCheaper ? "cheaper" : "target",
+                  g_enf_mode == kEnfTarget ? "allowed" : "never", g_upscaler_mode, UpName(up),
+                  g_crash_guard ? "on" : "off");
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+
+        char w[16] = "?", hgt[16] = "?", dm[16] = "?", vs[16] = "?", capOn[16] = "?", cap[16] = "?",
+             fg[16] = "?", mfg[16] = "?", aq[16] = "?", dyn[16] = "?", dl[16] = "?", fs[16] = "?",
+             xe[16] = "?", ta[16] = "?";
+        profile::ReadAttr(in, "resolution", "width", w, sizeof(w));
+        profile::ReadAttr(in, "resolution", "height", hgt, sizeof(hgt));
+        profile::ReadAttr(in, "resolution", "displayMode", dm, sizeof(dm));
+        profile::ReadAttr(in, "resolution", "vsync", vs, sizeof(vs));
+        profile::ReadAttr(in, "resolution", "frameRateLimiterEnabled", capOn, sizeof(capOn));
+        profile::ReadAttr(in, "resolution", "frameRateLimiterValue", cap, sizeof(cap));
+        profile::ReadAttr(in, "frame_gen", "mode", fg, sizeof(fg));
+        profile::ReadAttr(in, "multi_frame_gen", "value", mfg, sizeof(mfg));
+        profile::ReadAttr(in, "aa_quality", "value", aq, sizeof(aq));
+        profile::ReadAttr(in, "dynamicresolution_enabled", "value", dyn, sizeof(dyn));
+        profile::ReadAttr(in, "antialiasing", "dlss", dl, sizeof(dl));
+        profile::ReadAttr(in, "antialiasing", "fsr3", fs, sizeof(fs));
+        profile::ReadAttr(in, "antialiasing", "xess", xe, sizeof(xe));
+        profile::ReadAttr(in, "antialiasing", "taa", ta, sizeof(ta));
+        _snprintf(line, sizeof(line),
+                  "header: display %sx%s mode %s | vsync %s | frame cap %s (%s fps) | frame gen %s | "
+                  "multi frame gen %s | upscaler quality %s | dynamic resolution %s | "
+                  "in-game AA dlss=%s fsr3=%s xess=%s taa=%s",
+                  w, hgt, dm, vs, capOn, cap, fg, mfg, aq, dyn, dl, fs, xe, ta);
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+        if (!strcmp(vs, "true"))
+            Note("note: vsync is on, so fps cannot go above your refresh rate; the mod can't show "
+                 "a gain past it (it still lowers GPU load)");
+        if (!strcmp(capOn, "true")) {
+            _snprintf(line, sizeof(line),
+                      "note: the in-game frame cap is on (%s fps); fps cannot go above it", cap);
+            line[sizeof(line) - 1] = 0;
+            Note(line);
         }
-        _snprintf(gpuLine, sizeof(gpuLine), "GPU: %s (%s%s)", g.name,
-                  gpu::VendorName(g.vendor), series);
-    } else {
-        _snprintf(gpuLine, sizeof(gpuLine), "GPU: not detected");
+        if (g.integrated && up == profile::Upscaler::Keep)
+            Note("note: integrated GPU, so upscaler auto leaves your in-game choice alone");
     }
-    gpuLine[sizeof(gpuLine) - 1] = 0;
-    Note(gpuLine);
 
     char upLine[160];
     _snprintf(upLine, sizeof(upLine), "upscaler: mode=%s -> %s", g_upscaler_mode,
@@ -810,28 +868,61 @@ bool ApplyProfile() {
 
     {
         char line[96];
-        _snprintf(line, sizeof(line), "preset: %s", profile::PresetName(g_preset));
+        _snprintf(line, sizeof(line), "preset: %s%s", profile::PresetName(g_preset),
+                  g_preset_recommended ? " (recommended for this GPU)" : "");
         line[sizeof(line) - 1] = 0;
         Note(line);
     }
-    // Presets only add to the file, so switching e.g. Potato -> Balanced would
-    // leave Potato's extra cuts behind. When the preset changed since the last
-    // launch, start again from the untouched .untuned copy.
+    // When the preset changed since the last launch, or this is the first launch
+    // of 0.3.2 (older versions could write values above the player's own), put the
+    // player's own values back for the mod's attributes before applying the delta.
     {
         wchar_t last[MAX_PATH], bak[MAX_PATH];
         _snwprintf(last, MAX_PATH, L"%s\\f125_last_preset.txt", g_exe_dir);
         _snwprintf(bak, MAX_PATH, L"%s.untuned", dst);
-        char prev[32] = {0};
+        char prev[48] = {0};
         ReadFileAll(last, prev, sizeof(prev));
-        const char* cur = profile::PresetName(g_preset);
-        if (strncmp(prev, cur, strlen(cur)) != 0 || prev[strlen(cur)] != 0) {
-            if (prev[0] && ReadFileAll(bak, in, kCap)) {
-                Note("preset: changed since last launch - starting from the .untuned settings");
+        char cur[48];
+        _snprintf(cur, sizeof(cur), "%s;v032", profile::PresetName(g_preset));
+        cur[sizeof(cur) - 1] = 0;
+        if (strcmp(prev, cur) != 0) {
+            char* unt = (char*)malloc(kCap);
+            if (prev[0] && unt && ReadFileAll(bak, unt, kCap) &&
+                profile::RestoreOwned(in, unt, out, kCap) > 0) {
+                memcpy(in, out, strlen(out) + 1);
+                Note(strstr(prev, ";v032")
+                         ? "preset: changed since last launch - your own values restored before the new preset"
+                         : "profile: first 0.3.2 launch - your own values restored, the delta now only lowers them");
             }
+            free(unt);
             WriteFileAtomic(last, cur, strlen(cur));
         }
     }
-    size_t n = profile::Transform(in, out, kCap, up, g_preset);
+    struct Counts {
+        int set, kept;
+        bool log;
+    } counts = {0, 0, first};
+    profile::Options opt;
+    opt.up = up;
+    opt.preset = g_preset;
+    opt.allowRaise = g_enf_mode == kEnfTarget;
+    opt.lowVram = LowVram();
+    opt.user = &counts;
+    opt.onChange = [](const char* tag, const char* attr, const char* from, const char* to,
+                      bool kept, void* user) {
+        Counts* k = (Counts*)user;
+        (kept ? k->kept : k->set)++;
+        if (!k->log) return;
+        char line[224];
+        if (kept)
+            _snprintf(line, sizeof(line), "kept %s.%s = %s (tuned %s would cost more than your setting)",
+                      tag, attr, from, to);
+        else
+            _snprintf(line, sizeof(line), "set %s.%s: %s -> %s", tag, attr, from, to);
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+    };
+    size_t n = profile::Transform(in, out, kCap, opt);
     free(in);
     if (n == 0) {
         free(out);
@@ -846,13 +937,174 @@ bool ApplyProfile() {
     }
     free(out);
 
+    {
+        char line[128];
+        _snprintf(line, sizeof(line), "profile: %d value(s) lowered, %d kept as yours", counts.set,
+                  counts.kept);
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+    }
     Note("profile applied (tuned delta on hardware_settings_config.xml)");
     return true;
+}
+
+bool PresetIsRecommended() { return g_preset_recommended; }
+
+const gpu::Info& Gpu() {
+    if (!g_gpu_ready) {
+        g_gpu = gpu::Detect();
+        g_gpu_ready = true;
+    }
+    return g_gpu;
+}
+
+bool LowVram() {
+    const gpu::Info& g = Gpu();
+    return g.vendor != gpu::VendorUnknown && gpu::LowVram(g);
+}
+
+bool RestoreStockSettings(const char* why) {
+    wchar_t docs[MAX_PATH] = {0};
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_PERSONAL, nullptr, 0, docs))) return false;
+    wchar_t dst[MAX_PATH], bak[MAX_PATH];
+    _snwprintf(dst, MAX_PATH,
+               L"%s\\My Games\\F1 25\\hardwaresettings\\hardware_settings_config.xml", docs);
+    _snwprintf(bak, MAX_PATH, L"%s.untuned", dst);
+    const size_t kCap = 1 << 20;
+    char* cur = (char*)malloc(kCap);
+    char* unt = (char*)malloc(kCap);
+    char* out = (char*)malloc(kCap);
+    bool ok = false;
+    char line[200];
+    if (cur && unt && out && ReadFileAll(dst, cur, kCap) && ReadFileAll(bak, unt, kCap)) {
+        const size_t n = profile::RestoreOwned(cur, unt, out, kCap);
+        ok = n > 0 && WriteFileAtomic(dst, out, n);
+    }
+    _snprintf(line, sizeof(line), ok ? "%s - your own settings restored from .untuned"
+                                     : "%s - no .untuned backup found, settings left as they are",
+              why);
+    line[sizeof(line) - 1] = 0;
+    Note(line);
+    free(cur);
+    free(unt);
+    free(out);
+    return ok;
+}
+
+// --- crash safe mode --------------------------------------------------------
+namespace {
+testing::SafeState g_safe = {0, 0, 0};
+volatile long      g_safe_pending = 0;
+
+bool SafePath(wchar_t* path) {
+    if (!g_exe_dir[0]) return false;
+    _snwprintf(path, MAX_PATH, L"%s\\f125_launch_state.txt", g_exe_dir);
+    path[MAX_PATH - 1] = 0;
+    return true;
+}
+
+bool SafeWrite(const testing::SafeState& s) {
+    wchar_t path[MAX_PATH];
+    if (!SafePath(path)) return false;
+    char text[96];
+    testing::SafeFormat(s, F125_MOD_VERSION, text, sizeof(text));
+    return WriteFileAtomic(path, text, strlen(text));
+}
+}  // namespace
+
+bool CrashGuardStart() {
+    if (!g_crash_guard) {
+        Note("crash safe mode: off");
+        return false;
+    }
+    wchar_t path[MAX_PATH];
+    if (!SafePath(path)) return false;
+    char text[128] = {0};
+    testing::SafeState prev = {0, 0, 0};
+    if (ReadFileAll(path, text, sizeof(text))) testing::SafeParse(text, F125_MOD_VERSION, &prev);
+    const char* why = nullptr;
+    const bool safe = testing::SafeStart(prev, &g_safe, &why);
+    if (!SafeWrite(g_safe)) {
+        Note("crash safe mode: could not write f125_launch_state.txt - off for this launch");
+        return false;
+    }
+    InterlockedExchange(&g_safe_pending, 1);
+    if (why) {
+        char line[300];
+        _snprintf(line, sizeof(line), "crash safe mode: %s", why);
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+    }
+    return safe;
+}
+
+void ConfirmLaunch(const char* how) {
+    if (!InterlockedExchange(&g_safe_pending, 0)) return;
+    g_safe = testing::SafeConfirm(g_safe);
+    SafeWrite(g_safe);
+    if (how) {
+        char line[160];
+        _snprintf(line, sizeof(line), "crash safe mode: launch confirmed (%s)", how);
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+    }
 }
 
 namespace testing {
 profile::Upscaler ChooseUpscaler(const gpu::Info& g, const char* mode) {
     return ChooseUpscalerFor(g, mode);
+}
+
+bool SafeStart(const SafeState& prev, SafeState* write, const char** why) {
+    *why = nullptr;
+    if (prev.kind == 1) {
+        const int fails = prev.fails + 1;
+        const int hold = fails >= 2 ? 3 : 1;
+        *write = {2, fails, hold - 1};
+        *why = fails >= 2
+                   ? "the last two launches with the mod on never reached a stable menu; running "
+                     "stock for 3 launches, then the mod is tried again"
+                   : "the last launch with the mod on never reached a stable menu (crash or forced "
+                     "quit); this launch runs stock, the next one uses the mod again";
+        return true;
+    }
+    if (prev.kind == 2) {
+        *write = {1, 0, 0};
+        *why = "the last stock launch also crashed, so the crash was not caused by the mod; the "
+               "mod is on again";
+        return false;
+    }
+    if (prev.hold > 0) {
+        *write = {2, prev.fails, prev.hold - 1};
+        *why = "still running stock after repeated crashes with the mod on";
+        return true;
+    }
+    *write = {1, prev.fails, 0};
+    return false;
+}
+
+SafeState SafeConfirm(const SafeState& cur) {
+    if (cur.kind == 1) return {0, 0, 0};
+    return {0, cur.fails, cur.hold};
+}
+
+bool SafeParse(const char* text, const char* version, SafeState* out) {
+    *out = {0, 0, 0};
+    char kind[16] = {0}, ver[48] = {0};
+    int fails = 0, hold = 0;
+    if (sscanf(text, "%15s %d %d %47s", kind, &fails, &hold, ver) != 4) return false;
+    if (strcmp(ver, version) != 0 || fails < 0 || fails > 99 || hold < 0 || hold > 9) return false;
+    if (!strcmp(kind, "pending")) *out = {1, fails, hold};
+    else if (!strcmp(kind, "safe")) *out = {2, fails, hold};
+    else if (!strcmp(kind, "ok")) *out = {0, fails, hold};
+    else return false;
+    return true;
+}
+
+void SafeFormat(const SafeState& s, const char* version, char* out, size_t cap) {
+    const char* k = s.kind == 1 ? "pending" : s.kind == 2 ? "safe" : "ok";
+    _snprintf(out, cap, "%s %d %d %s\r\n", k, s.fails, s.hold, version);
+    out[cap - 1] = 0;
 }
 }  // namespace testing
 

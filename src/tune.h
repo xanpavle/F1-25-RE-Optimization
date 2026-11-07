@@ -43,8 +43,26 @@ bool LogReport();
 bool UnknownBuildOff();
 // [profile] status_popup = 1: show a short "mod loaded / error" banner at launch.
 bool StatusPopup();
-// [profile] preset = quality | balanced | potato.
+// [profile] preset = recommended | quality | balanced | potato (recommended is
+// resolved from the detected GPU).
 profile::Preset GetPreset();
+bool PresetIsRecommended();
+
+// The GPU detected once at Init (vendor, model, integrated, VRAM).
+const gpu::Info& Gpu();
+// 8 GB or less, or integrated: memory-heavy settings never raise, even in target.
+bool LowVram();
+
+// Crash safe mode ([profile] crash_safe_mode = 1, default). Call once at startup:
+// returns true when this launch must run stock because the last launch with the
+// mod on never got confirmed. ConfirmLaunch() marks the launch as good (90 s alive
+// or a clean exit).
+bool CrashGuardStart();
+void ConfirmLaunch(const char* how);
+
+// Puts the player's own values back for every attribute the mod owns (from the
+// .untuned copy), leaving resolution and everything else as it is now.
+bool RestoreStockSettings(const char* why);
 // A/B switch: while f125_ab_stock.txt exists next to the game, the next launch
 // runs fully stock (untouched settings restored, no in-engine hooks).
 bool StockMode();
@@ -60,6 +78,18 @@ void SetUnknownBuild(bool unknown);
 // Test seam: the GPU -> backend mapping without touching the ini or the OS.
 namespace testing {
 profile::Upscaler ChooseUpscaler(const gpu::Info& g, const char* mode);
+
+// Crash safe mode steps (pure). kind: 0 ok, 1 pending, 2 safe.
+struct SafeState {
+    int kind;
+    int fails;
+    int hold;
+};
+// Returns true when the launch runs stock; *write is the state to store now.
+bool SafeStart(const SafeState& prev, SafeState* write, const char** why);
+SafeState SafeConfirm(const SafeState& cur);
+bool SafeParse(const char* text, const char* version, SafeState* out);
+void SafeFormat(const SafeState& s, const char* version, char* out, size_t cap);
 }
 
 // [enforce] per-attribute override of the in-engine table.

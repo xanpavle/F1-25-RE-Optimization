@@ -5,6 +5,64 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] - 2026-11-07
+
+**Fixes from the players' Send Logs data: the mod no longer makes any setting
+more expensive than your own, integrated GPUs keep their upscaler, and a crash
+can no longer turn into a crash loop.** Same version number as the Swofty
+Launcher addon from now on.
+
+### Fixed
+
+- **The settings delta could raise settings on Low presets.** It wrote fixed
+  values (shadows 2048, fog 512×288, grass 80 ...) whatever you had, so a
+  player on Low got bigger shadow and fog maps than their own preset. Now a
+  tuned value is written only when it costs the same or less than yours; the
+  rest is kept and logged as `kept <setting> = <yours>`. Raising is only done
+  in `enforce_mode = target`.
+- **Rain, grass, fog and night character shadows were pinned ON in every
+  mode**, which also raised cost on Low. They are now only pinned in `target`
+  mode, and never under Potato. God rays, lens streak and motion blur are
+  still pinned OFF (that only removes work).
+- **Potato could be slower than Balanced.** Its cloud scale was 4.0, which is
+  the Ultra value (the scale is the cloud render resolution, so lower is
+  cheaper; Balanced uses 2.0). It is now 1.0, and a test checks that no
+  Potato value costs more than Balanced's.
+- **Integrated GPUs (Intel Iris Xe / UHD, Radeon APU graphics) no longer get
+  FSR 3 forced.** `upscaler = auto` leaves your in-game choice there. A
+  discrete card is now always picked over the CPU's graphics.
+- **First 0.3.2 launch puts your own values back** for the settings the mod
+  owns (from the `.untuned` copy) before applying the new delta, so values an
+  older version raised do not stick. Your resolution and other settings stay.
+
+### Added
+
+- **`preset = recommended`** (new default, also menu option 4 in the
+  installer): picked from your GPU and its VRAM at every launch. Integrated
+  graphics, GTX, RX 5000 and 4 GB cards get Potato; RTX 4080+, 5070 Ti+,
+  RX 7900 and 9070 get Quality; the rest get Balanced.
+- **VRAM guard.** On GPUs with 8 GB or less, and on integrated graphics,
+  shadow maps, fog maps, car reflections and texture streaming are never
+  raised, even in `target` mode.
+- **Crash safe mode** (`crash_safe_mode = 1`, default). If a launch with the
+  mod on crashes or is killed before the game has run for 90 s, the next
+  launch runs stock and the log says why. Two in a row keep it stock for three
+  launches, then the mod is tried again. If the stock launch crashes too, the
+  crash was not the mod's and the mod runs again.
+- **Log header** with everything needed to compare two logs: version, GPU,
+  vendor, integrated, VRAM, preset (and what Recommended picked), mode,
+  upscaler, resolution, display mode, vsync, frame cap, frame generation,
+  upscaler quality, dynamic resolution, and every value changed as
+  `set <setting>: <yours> -> <tuned>`.
+- **Notes when the mod can't show a gain:** the log says so when vsync or the
+  in-game frame cap is on.
+
+### Changed
+
+- A/B stock mode (Ctrl+F10) now restores only the settings the mod owns from
+  `.untuned`, so your current resolution and display settings stay.
+- Version `0.3.2` in the DLL, installer output and docs.
+
 ## [0.3.0.5] - 2026-10-24
 
 **Crash fix for players who also use Swofty Launcher. No change otherwise.**

@@ -10,5 +10,10 @@ int main(void) {
     printf("series : %d\n", g.series);
     printf("dlss   : %s\n", g.supportsDlss ? "yes" : "no");
     printf("xess   : %s\n", g.supportsXess ? "yes" : "no");
+    printf("model  : %d\n", g.model);
+    printf("integr.: %s\n", g.integrated ? "yes" : "no");
+    printf("vram   : %u MB%s\n", g.vramMb, g.vramMb ? "" : " (unknown)");
+    printf("lowvram: %s\n", gpu::LowVram(g) ? "yes" : "no");
+    printf("recomm.: %s\n", profile::PresetName(gpu::Recommend(g)));
     return 0;
 }

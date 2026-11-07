@@ -595,6 +595,13 @@ void ResolveSites(uintptr_t parseInt, uintptr_t parseBool,
     }
 }
 
+// Shadow maps, fog maps and the texture streaming pool grow VRAM use.
+bool MemoryHeavySite(const char* name) {
+    const size_t n = strlen(name);
+    return (n > 7 && !strcmp(name + n - 7, "MapSize")) ||
+           !strncmp(name, "volumetricFogMap", 16) || !strcmp(name, "textureStreamingMiB");
+}
+
 // Applies the [enforce] section overrides on top of the built-in table.
 void ApplyOverrides() {
     int changed = 0, disabled = 0;
@@ -640,14 +647,17 @@ int DetourParseInt(const char* value, int def, int flags) {
             // `target`: the mod defines the quality level, so the tuned value wins
             // even if the engine's preset is lower. `cheaper`: only ever remove
             // work (the tuned value is a ceiling).
+            // 0.3.2: on 8 GB or less (or integrated), memory-heavy sites never
+            // raise, even in target.
             const int tuned = (int)g_enf[i].value;
-            const int out = tune::EnforceTarget() ? tuned
-                                                  : ((orig < tuned) ? orig : tuned);
+            const bool raise = tune::EnforceTarget() &&
+                               !(tune::LowVram() && MemoryHeavySite(g_enf[i].name));
+            const int out = raise ? tuned : ((orig < tuned) ? orig : tuned);
             if (InterlockedExchange(&g_enf[i].logged, 1) == 0) {
                 char line[192];
                 _snprintf(line, sizeof(line),
                           "enforce: %s -> %d (preset gave %d, mode=%s)", g_enf[i].name,
-                          out, orig, tune::EnforceTarget() ? "target" : "cheaper");
+                          out, orig, raise ? "target" : "cheaper");
                 line[sizeof(line) - 1] = 0;
                 Note(line);
             }
@@ -1086,11 +1096,19 @@ static void* PatchAt(uintptr_t va, const char* pro, size_t n, void* detour) {
 // Pins bool attributes by rewriting the 5-byte `call strcmp` with
 // `mov eax, imm32`. Returns the number of sites patched.
 static int PatchBoolSites() {
-    int done = 0, skipped = 0, disabled = 0;
+    int done = 0, skipped = 0, disabled = 0, kept = 0;
+    // 0.3.2: effects pinned ON (rain, grass, fog, night character shadows) are
+    // only forced in target mode and never under Potato; otherwise the player's
+    // own setting stays. Pins to OFF always apply (they only remove work).
+    const bool pinOn = tune::EnforceTarget() && tune::GetPreset() != profile::Preset::Potato;
     for (int i = 0; i < kBoolCount; ++i) {
         const BoolEnf& e = g_bool[i];
         if (e.disabled || e.call_rva == 0) {
             ++disabled;
+            continue;
+        }
+        if (e.value && !pinOn) {
+            ++kept;
             continue;
         }
         BYTE* site = (BYTE*)(g_base + e.call_rva);
@@ -1124,8 +1142,8 @@ static int PatchBoolSites() {
         char line[192];
         _snprintf(line, sizeof(line),
                   "enforce: %d bool attributes pinned to the tuned profile "
-                  "(%d disabled, %d unavailable)",
-                  done, disabled, skipped);
+                  "(%d left as yours, %d disabled, %d unavailable)",
+                  done, kept, disabled, skipped);
         line[sizeof(line) - 1] = 0;
         Note(line);
     }

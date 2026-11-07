@@ -13,6 +13,8 @@
 // cost far more than they show (measured +10% on the RX 7800 XT at 1440p, with
 // no visible change once the reflections/shadows stay on).
 #include "profile.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 namespace profile {
@@ -128,7 +130,9 @@ const Ov kPotato[] = {
     {"weather_effects", "trackHeatHaze", "false"},
     {"weather_effects", "planarReflectionsHQEnabled", "false"},
     {"weather_effects", "planarReflectionsRTScale", "0.5"},
-    {"weather_effects", "proceduralCloudRTScale", "4.0"},
+    // 0.3.2: was 4.0, the Ultra value (the scale is the cloud render resolution,
+    // lower is cheaper; Balanced uses 2.0), which made Potato heavier than Balanced.
+    {"weather_effects", "proceduralCloudRTScale", "1.0"},
     {"weather_effects", "proceduralCloudQuality", "0"},
     {"ground_cover", "enabled", "false"},
     {"ground_cover", "meshes", "false"},
@@ -175,10 +179,76 @@ void ReplaceAttr(char* line, size_t cap, const char* attr, const char* val) {
     }
 }
 
-void ApplyTable(char* line, size_t cap, const char* tag, const Ov* t, int n) {
-    for (int i = 0; i < n; ++i) {
-        if (strcmp(t[i].tag, tag) == 0) ReplaceAttr(line, cap, t[i].attr, t[i].val);
+// Finds attr="..." in one element line; returns the value span.
+bool FindAttr(const char* line, const char* attr, const char** vs, const char** ve) {
+    const size_t alen = strlen(attr);
+    const char* p = line;
+    while ((p = strstr(p, attr)) != nullptr) {
+        if (p != line && p[-1] != ' ' && p[-1] != '\t' && p[-1] != '<') {
+            p += alen;
+            continue;
+        }
+        if (p[alen] != '=' || p[alen + 1] != '"') {
+            p += alen;
+            continue;
+        }
+        *vs = p + alen + 2;
+        *ve = strchr(*vs, '"');
+        return *ve != nullptr;
     }
+    return false;
+}
+
+bool GetAttr(const char* line, const char* attr, char* out, size_t cap) {
+    const char *vs, *ve;
+    if (!FindAttr(line, attr, &vs, &ve)) return false;
+    size_t n = (size_t)(ve - vs);
+    if (n >= cap) n = cap - 1;
+    memcpy(out, vs, n);
+    out[n] = 0;
+    return true;
+}
+
+bool ParseNum(const char* v, double* out) {
+    if (!_stricmp(v, "true")) { *out = 1; return true; }
+    if (!_stricmp(v, "false")) { *out = 0; return true; }
+    if (!*v) return false;
+    char* end = nullptr;
+    *out = strtod(v, &end);
+    return end && *end == 0 && end != v;
+}
+
+int Merge(Preset p, Entry* out, int cap) {
+    int n = 0;
+    auto put = [&](const Ov& o) {
+        for (int i = 0; i < n; ++i)
+            if (!strcmp(out[i].tag, o.tag) && !strcmp(out[i].attr, o.attr)) {
+                out[i].val = o.val;
+                return;
+            }
+        if (n < cap) out[n++] = {o.tag, o.attr, o.val};
+    };
+    for (int i = 0; i < kOvCount; ++i) put(kOv[i]);
+    if (p == Preset::Quality)
+        for (int i = 0; i < kQualityCount; ++i) put(kQuality[i]);
+    else if (p == Preset::Potato)
+        for (int i = 0; i < kPotatoCount; ++i) put(kPotato[i]);
+    return n;
+}
+
+// Writes the tuned value only when it costs no more than the current one, or when
+// raising is allowed and the attribute is not memory-heavy on a low-VRAM GPU.
+void GuardedAttr(char* line, size_t cap, const char* tag, const Entry& e, const Options& o) {
+    char cur[64];
+    if (!GetAttr(line, e.attr, cur, sizeof(cur))) return;
+    if (!strcmp(cur, e.val)) return;
+    const bool raiseOk = o.allowRaise && !(o.lowVram && MemoryHeavy(tag, e.attr));
+    if (!raiseOk && !CheaperOrEqual(tag, e.attr, cur, e.val)) {
+        if (o.onChange) o.onChange(tag, e.attr, cur, e.val, true, o.user);
+        return;
+    }
+    ReplaceAttr(line, cap, e.attr, e.val);
+    if (o.onChange) o.onChange(tag, e.attr, cur, e.val, false, o.user);
 }
 
 // Switch the <antialiasing .../> element to the requested backend.
@@ -233,8 +303,49 @@ const char* PresetName(Preset p) {
     }
 }
 
-size_t Transform(const char* in, char* out, size_t cap, Upscaler up, Preset preset) {
-    size_t o = 0;
+int Entries(Preset p, Entry* out, int cap) { return Merge(p, out, cap); }
+
+bool CheaperOrEqual(const char* tag, const char* attr, const char* original,
+                    const char* tuned) {
+    double o, t;
+    if (!ParseNum(original, &o) || !ParseNum(tuned, &t)) return true;
+    const bool higherIsCheaper = !strcmp(attr, "texelDensityBias") ||
+                                 !strcmp(attr, "skyShadowLowLod") ||
+                                 (!strcmp(tag, "cs_culling") && !strcmp(attr, "enabled"));
+    return higherIsCheaper ? t >= o : t <= o;
+}
+
+bool MemoryHeavy(const char* tag, const char* attr) {
+    const size_t n = strlen(attr);
+    if (!strcmp(tag, "shadows")) return n > 7 && !strcmp(attr + n - 7, "MapSize");
+    if (!strcmp(tag, "lighting")) return !strncmp(attr, "volumetricFogMap", 16);
+    if (!strcmp(tag, "vehicle_reflections"))
+        return !strcmp(attr, "envMapScale") || !strcmp(attr, "cubeMapScale") ||
+               !strcmp(attr, "cubeMapEnabled");
+    if (!strcmp(tag, "texture_streaming")) return true;
+    return false;
+}
+
+bool ReadAttr(const char* xml, const char* tag, const char* attr, char* out, size_t cap) {
+    char open[80];
+    _snprintf(open, sizeof(open), "<%s ", tag);
+    open[sizeof(open) - 1] = 0;
+    const char* p = strstr(xml, open);
+    if (!p) return false;
+    const char* end = strchr(p, '>');
+    if (!end) return false;
+    char line[4096];
+    size_t n = (size_t)(end - p) + 1;
+    if (n >= sizeof(line)) n = sizeof(line) - 1;
+    memcpy(line, p, n);
+    line[n] = 0;
+    return GetAttr(line, attr, out, cap);
+}
+
+size_t Transform(const char* in, char* out, size_t cap, const Options& o) {
+    Entry entries[128];
+    const int ne = Merge(o.preset, entries, 128);
+    size_t w = 0;
     const char* p = in;
     while (*p) {
         const char* nl = strchr(p, '\n');
@@ -247,25 +358,65 @@ size_t Transform(const char* in, char* out, size_t cap, Upscaler up, Preset pres
 
         char tag[64];
         if (ElemTag(line, tag, sizeof(tag)) > 0) {
-            if (up != Upscaler::Keep && strcmp(tag, "antialiasing") == 0) {
-                ApplyUpscaler(line, sizeof(line), up);
+            if (o.up != Upscaler::Keep && strcmp(tag, "antialiasing") == 0) {
+                ApplyUpscaler(line, sizeof(line), o.up);
             }
-            ApplyTable(line, sizeof(line), tag, kOv, kOvCount);
-            if (preset == Preset::Quality)
-                ApplyTable(line, sizeof(line), tag, kQuality, kQualityCount);
-            else if (preset == Preset::Potato)
-                ApplyTable(line, sizeof(line), tag, kPotato, kPotatoCount);
+            for (int i = 0; i < ne; ++i)
+                if (!strcmp(entries[i].tag, tag)) GuardedAttr(line, sizeof(line), tag, entries[i], o);
         }
 
         size_t llen = strlen(line);
-        if (o + llen + 1 > cap) return 0;
-        memcpy(out + o, line, llen);
-        o += llen;
+        if (w + llen + 1 > cap) return 0;
+        memcpy(out + w, line, llen);
+        w += llen;
 
         p += len;
     }
-    out[o] = 0;
-    return o;
+    out[w] = 0;
+    return w;
+}
+
+size_t Transform(const char* in, char* out, size_t cap, Upscaler up, Preset preset) {
+    Options o;
+    o.up = up;
+    o.preset = preset;
+    return Transform(in, out, cap, o);
+}
+
+size_t RestoreOwned(const char* cur, const char* untuned, char* out, size_t cap) {
+    // The upscaler backend selectors are the mod's too.
+    static const Ov kAa[] = {{"antialiasing", "taa", ""},  {"antialiasing", "cas", ""},
+                             {"antialiasing", "dlss", ""}, {"antialiasing", "fsr3", ""},
+                             {"antialiasing", "xess", ""}};
+    const Ov* tables[4] = {kOv, kQuality, kPotato, kAa};
+    const int counts[4] = {kOvCount, kQualityCount, kPotatoCount, 5};
+    size_t w = 0;
+    const char* p = cur;
+    while (*p) {
+        const char* nl = strchr(p, '\n');
+        size_t len = nl ? (size_t)(nl - p) + 1 : strlen(p);
+        char line[4096];
+        size_t copy = (len < sizeof(line) - 1) ? len : sizeof(line) - 1;
+        memcpy(line, p, copy);
+        line[copy] = 0;
+        char tag[64];
+        if (ElemTag(line, tag, sizeof(tag)) > 0) {
+            for (int t = 0; t < 4; ++t)
+                for (int i = 0; i < counts[t]; ++i) {
+                    if (strcmp(tables[t][i].tag, tag)) continue;
+                    char v[64];
+                    if (ReadAttr(untuned, tag, tables[t][i].attr, v, sizeof(v)))
+                        ReplaceAttr(line, sizeof(line), tables[t][i].attr, v);
+                }
+        }
+        size_t llen = strlen(line);
+        if (w + llen + 1 > cap) return 0;
+        memcpy(out + w, line, llen);
+        w += llen;
+        p += len;
+    }
+    out[w] = 0;
+    return w;
 }
 
 }  // namespace profile

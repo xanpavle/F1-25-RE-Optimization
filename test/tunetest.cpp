@@ -38,6 +38,7 @@ int main(void) {
     gpu::Info amd{};      amd.vendor = gpu::VendorAmd;
     gpu::Info arc{};      arc.vendor = gpu::VendorIntel; arc.supportsXess = true;
     gpu::Info igpu{};     igpu.vendor = gpu::VendorIntel; igpu.supportsXess = false;
+    igpu.integrated = true;
     gpu::Info unknown{};
 
     int map = 1;
@@ -49,7 +50,10 @@ int main(void) {
                  profile::Upscaler::Fsr3);
     map &= Check("auto Intel Arc -> XeSS", tune::testing::ChooseUpscaler(arc, "auto"),
                  profile::Upscaler::Xess);
-    map &= Check("auto Intel iGPU -> FSR3", tune::testing::ChooseUpscaler(igpu, "auto"),
+    // 0.3.2: integrated GPUs keep the player's own upscaler.
+    map &= Check("auto Intel iGPU -> keep", tune::testing::ChooseUpscaler(igpu, "auto"),
+                 profile::Upscaler::Keep);
+    map &= Check("forced fsr3 on iGPU", tune::testing::ChooseUpscaler(igpu, "fsr3"),
                  profile::Upscaler::Fsr3);
     map &= Check("auto unknown -> keep", tune::testing::ChooseUpscaler(unknown, "auto"),
                  profile::Upscaler::Keep);
@@ -66,7 +70,74 @@ int main(void) {
     map &= Check("forced keep", tune::testing::ChooseUpscaler(nv, "keep"),
                  profile::Upscaler::Keep);
 
-    const int all = ok && map;
+    // 0.3.2: integrated detection, VRAM guard and the Recommended preset.
+    int g032 = 1;
+    auto T = [&](const char* label, bool cond) {
+        printf("%s: %s\n", label, cond ? "ok" : "FAIL");
+        g032 &= cond ? 1 : 0;
+    };
+    using gpu::Classify;
+    T("APU Radeon(TM) Graphics integrated", Classify(gpu::VendorAmd, L"AMD Radeon(TM) Graphics").integrated);
+    T("Radeon 780M integrated", Classify(gpu::VendorAmd, L"AMD Radeon 780M Graphics").integrated);
+    T("RX Vega 11 Graphics integrated", Classify(gpu::VendorAmd, L"AMD Radeon RX Vega 11 Graphics").integrated);
+    T("RX Vega 64 discrete", !Classify(gpu::VendorAmd, L"AMD Radeon RX Vega 64").integrated);
+    T("RX 6650 XT discrete", !Classify(gpu::VendorAmd, L"AMD Radeon RX 6650 XT").integrated);
+    T("Iris Xe integrated", Classify(gpu::VendorIntel, L"Intel(R) Iris(R) Xe Graphics").integrated);
+    T("Arc Graphics (MTL) integrated", Classify(gpu::VendorIntel, L"Intel(R) Arc(TM) Graphics").integrated);
+    T("Arc B580 discrete", !Classify(gpu::VendorIntel, L"Intel(R) Arc(TM) B580 Graphics").integrated);
+    T("APU auto -> keep",
+      tune::testing::ChooseUpscaler(Classify(gpu::VendorAmd, L"AMD Radeon(TM) Graphics"), "auto") ==
+          profile::Upscaler::Keep);
+    gpu::Info v8 = Classify(gpu::VendorNvidia, L"NVIDIA GeForce RTX 3070");
+    T("unknown VRAM not low", !gpu::LowVram(v8));
+    v8.vramMb = 8192;
+    T("8 GB low", gpu::LowVram(v8));
+    v8.vramMb = 12288;
+    T("12 GB not low", !gpu::LowVram(v8));
+    auto R = [](gpu::Vendor v, const wchar_t* n, unsigned vram) {
+        gpu::Info i = gpu::Classify(v, n);
+        i.vramMb = vram;
+        return gpu::Recommend(i);
+    };
+    T("4090 quality", R(gpu::VendorNvidia, L"NVIDIA GeForce RTX 4090", 0) == profile::Preset::Quality);
+    T("5070 Ti quality", R(gpu::VendorNvidia, L"NVIDIA GeForce RTX 5070 Ti", 0) == profile::Preset::Quality);
+    T("5070 balanced", R(gpu::VendorNvidia, L"NVIDIA GeForce RTX 5070", 0) == profile::Preset::Balanced);
+    T("GTX 1660 potato", R(gpu::VendorNvidia, L"NVIDIA GeForce GTX 1660 SUPER", 0) == profile::Preset::Potato);
+    T("4 GB potato", R(gpu::VendorNvidia, L"NVIDIA GeForce RTX 3050", 4096) == profile::Preset::Potato);
+    T("7900 XTX quality", R(gpu::VendorAmd, L"AMD Radeon RX 7900 XTX", 0) == profile::Preset::Quality);
+    T("9070 XT quality", R(gpu::VendorAmd, L"AMD Radeon RX 9070 XT", 0) == profile::Preset::Quality);
+    T("7800 XT balanced", R(gpu::VendorAmd, L"AMD Radeon RX 7800 XT", 0) == profile::Preset::Balanced);
+    T("5700 XT potato", R(gpu::VendorAmd, L"AMD Radeon RX 5700 XT", 0) == profile::Preset::Potato);
+    T("APU potato", R(gpu::VendorAmd, L"AMD Radeon(TM) Graphics", 0) == profile::Preset::Potato);
+    T("Arc A770 balanced", R(gpu::VendorIntel, L"Intel(R) Arc(TM) A770 Graphics", 0) == profile::Preset::Balanced);
+
+    // 0.3.2: crash safe mode steps.
+    using tune::testing::SafeState;
+    SafeState w;
+    const char* why = nullptr;
+    T("fresh: mod runs", !tune::testing::SafeStart({0, 0, 0}, &w, &why) && w.kind == 1 && !why);
+    T("confirm -> ok", tune::testing::SafeConfirm(w).kind == 0);
+    SafeState crash1;
+    T("crash -> stock once", tune::testing::SafeStart({1, 0, 0}, &crash1, &why) && crash1.fails == 1 &&
+                                 crash1.hold == 0 && why);
+    SafeState back;
+    T("after stock -> mod again", !tune::testing::SafeStart(tune::testing::SafeConfirm(crash1), &back, &why));
+    SafeState hold;
+    T("second crash -> hold 3", tune::testing::SafeStart(back, &hold, &why) && hold.fails == 2 && hold.hold == 2);
+    SafeState h2, h3, h4;
+    T("hold 2", tune::testing::SafeStart(tune::testing::SafeConfirm(hold), &h2, &why));
+    T("hold 3", tune::testing::SafeStart(tune::testing::SafeConfirm(h2), &h3, &why));
+    T("hold over", !tune::testing::SafeStart(tune::testing::SafeConfirm(h3), &h4, &why));
+    SafeState s2;
+    T("stock crashed too -> mod", !tune::testing::SafeStart(crash1, &s2, &why) && s2.kind == 1 && s2.fails == 0);
+    char text[96];
+    tune::testing::SafeFormat(hold, "0.3.2", text, sizeof(text));
+    SafeState parsed;
+    T("parse round trip", tune::testing::SafeParse(text, "0.3.2", &parsed) && parsed.kind == 2 &&
+                              parsed.fails == 2 && parsed.hold == 2);
+    T("new version starts clean", !tune::testing::SafeParse(text, "0.3.3", &parsed) && parsed.kind == 0);
+
+    const int all = ok && map && g032;
     printf(all ? "PASS\n" : "FAIL\n");
     return all ? 0 : 1;
 }

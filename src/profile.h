@@ -30,11 +30,57 @@ enum class Preset {
 
 const char* PresetName(Preset p);
 
+// Called once per tuned attribute: kept = true when the tuned value was NOT
+// written because it would cost more than the player's own value.
+typedef void (*ChangeFn)(const char* tag, const char* attr, const char* from,
+                         const char* to, bool kept, void* user);
+
+struct Options {
+    Upscaler up = Upscaler::Keep;
+    Preset   preset = Preset::Balanced;
+    // false (default, 0.3.2): a tuned value is written only when it costs the same
+    // or less than the value already in the file. true (enforce_mode = target):
+    // tuned values may raise a setting.
+    bool     allowRaise = false;
+    // 8 GB or less, or integrated: memory-heavy settings never raise, even in target.
+    bool     lowVram = false;
+    ChangeFn onChange = nullptr;
+    void*    user = nullptr;
+};
+
 // Rewrites known attributes in `in` (NUL-terminated XML) to tuned values,
 // writing the result to `out` (cap bytes, NUL-terminated).
 // When `up` is not Keep, the <antialiasing> element is switched to that backend.
 // Returns the output length, or 0 on error.
+size_t Transform(const char* in, char* out, size_t cap, const Options& o);
+
+// Old signature (never raises).
 size_t Transform(const char* in, char* out, size_t cap,
                  Upscaler up = Upscaler::Keep, Preset preset = Preset::Balanced);
+
+// True when `tuned` costs the same or less GPU time than `original`. Numbers:
+// lower is cheaper, except texelDensityBias. Booleans: false is cheaper, except
+// skyShadowLowLod and cs_culling.enabled. Anything else counts as cheaper.
+bool CheaperOrEqual(const char* tag, const char* attr, const char* original,
+                    const char* tuned);
+
+// Shadow / fog / reflection maps and texture streaming: they grow VRAM use.
+bool MemoryHeavy(const char* tag, const char* attr);
+
+// Value of attr on the first <tag ...> element. Returns false when missing.
+bool ReadAttr(const char* xml, const char* tag, const char* attr, char* out, size_t cap);
+
+// Every attribute the mod may change (any preset) is copied from `untuned` into
+// `cur`, so the next Transform starts from the player's own values. Everything
+// else (resolution, display, audio ...) stays as in `cur`. Returns the length or 0.
+size_t RestoreOwned(const char* cur, const char* untuned, char* out, size_t cap);
+
+// The merged tuned values of a preset (for tests).
+struct Entry {
+    const char* tag;
+    const char* attr;
+    const char* val;
+};
+int Entries(Preset p, Entry* out, int cap);
 
 }  // namespace profile
