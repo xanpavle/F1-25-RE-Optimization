@@ -153,10 +153,13 @@ struct BoolEnf {
     const char* name;
     const char* key;
     int         disabled;
+    // 0.3.4: set only under the Potato preset (left as the player's own otherwise).
+    // skyShadowLowLod is one, and ON is its cheaper value.
+    int         potatoOnly;
 };
 BoolEnf g_bool[] = {
     // --- tuned delta (matches src/profile.cpp; the file alone can be reverted) ---
-    {0x3dc3c08,  false, "skyShadowLowLod",            "skyShadowLowLod",            0},
+    {0x3dc3c08,  true,  "skyShadowLowLod",            "skyShadowLowLod",            0, 1},
     {0x3dc3b28,  false, "skyShadowMap32Bits",         "skyShadowMap32Bits",         0},
     {0x874aa08,  false, "crowdInShadows",             "crowdInShadows",             0},
     {0x2c8d638,  false, "godRays",                    "godRays",                    0},
@@ -616,7 +619,7 @@ void ApplyOverrides() {
         int v = 0, d = 0;
         if (tune::LookupEnforce(g_bool[i].name, &v, &d)) {
             if (d) { g_bool[i].disabled = 1; ++disabled; }
-            else { g_bool[i].value = (v != 0); ++changed; }
+            else { g_bool[i].value = (v != 0); g_bool[i].potatoOnly = 0; ++changed; }
         }
     }
     for (int i = 0; i < kFloatCount; ++i) {
@@ -1100,14 +1103,15 @@ static int PatchBoolSites() {
     // 0.3.2: effects pinned ON (rain, grass, fog, night character shadows) are
     // only forced in target mode and never under Potato; otherwise the player's
     // own setting stays. Pins to OFF always apply (they only remove work).
-    const bool pinOn = tune::EnforceTarget() && tune::GetPreset() != profile::Preset::Potato;
+    const bool potato = tune::GetPreset() == profile::Preset::Potato;
+    const bool pinOn = tune::EnforceTarget() && !potato;
     for (int i = 0; i < kBoolCount; ++i) {
         const BoolEnf& e = g_bool[i];
         if (e.disabled || e.call_rva == 0) {
             ++disabled;
             continue;
         }
-        if (e.value && !pinOn) {
+        if (e.potatoOnly ? !potato : (e.value && !pinOn)) {
             ++kept;
             continue;
         }

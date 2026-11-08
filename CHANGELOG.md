@@ -5,6 +5,17 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.3.4] - 2026-11-08
+
+### Fixed
+
+- **Sky shadow low LOD was switched off on every preset**, which costs a little
+  more than the player's own setting when they had it on. It is now set only by
+  the Potato preset, and then ON (the cheaper value), as the file profile always
+  said. Balanced and Quality leave it as yours. A value you set yourself in
+  `f125_tune.ini` still applies.
+- Version `0.3.4` in the DLL, installer output and docs.
+
 ## [0.3.3] - 2026-11-08
 
 **Follow-up from the first 0.3.2 Send Logs.** Crashes in those logs happened

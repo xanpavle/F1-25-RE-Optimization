@@ -150,10 +150,10 @@ a second.
 
 ## Did it actually work?
 
-Open `f125_tune.log` in the game folder. A healthy v0.3.3 launch looks like:
+Open `f125_tune.log` in the game folder. A healthy v0.3.4 launch looks like:
 
 ```
-[mod] F1 25 RE-Optimization v0.3.3
+[mod] F1 25 RE-Optimization v0.3.4
 [mod] header: GPU AMD Radeon RX 7800 XT | vendor AMD | integrated no | VRAM 16368 MB | low-VRAM guard off
 [mod] header: preset recommended -> balanced | enforce cheaper (raise never) | upscaler auto -> FSR 3 | crash safe mode on
 [mod] build: F1_25.exe 1.0.141.7865 verified (timestamp 6AA3C898, image 193E6000)
