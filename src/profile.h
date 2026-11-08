@@ -70,6 +70,15 @@ bool MemoryHeavy(const char* tag, const char* attr);
 // Value of attr on the first <tag ...> element. Returns false when missing.
 bool ReadAttr(const char* xml, const char* tag, const char* attr, char* out, size_t cap);
 
+// The upscaler the settings file has switched on (Keep when the file does not say).
+Upscaler FileUpscaler(const char* xml);
+// Frame generation on in the settings file (frame_gen mode not 0, or multi frame gen 2x+).
+bool FrameGenOn(const char* xml);
+// 0.3.5: in F1 25 frame generation belongs to the upscaler, so switching the
+// upscaler can switch frame generation off and cost far more fps than it gains.
+// With frame generation on, an upscaler different from the file's own becomes Keep.
+Upscaler FrameGenGuard(const char* xml, Upscaler up);
+
 // Every attribute the mod may change (any preset) is copied from `untuned` into
 // `cur`, so the next Transform starts from the player's own values. Everything
 // else (resolution, display, audio ...) stays as in `cur`. Returns the length or 0.

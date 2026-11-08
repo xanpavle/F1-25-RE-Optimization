@@ -422,4 +422,30 @@ size_t RestoreOwned(const char* cur, const char* untuned, char* out, size_t cap)
     return w;
 }
 
+Upscaler FileUpscaler(const char* xml) {
+    char dl[16], fs[16], xe[16], ta[16];
+    const bool hd = ReadAttr(xml, "antialiasing", "dlss", dl, sizeof(dl));
+    const bool hf = ReadAttr(xml, "antialiasing", "fsr3", fs, sizeof(fs));
+    const bool hx = ReadAttr(xml, "antialiasing", "xess", xe, sizeof(xe));
+    const bool ht = ReadAttr(xml, "antialiasing", "taa", ta, sizeof(ta));
+    if (hd && !strcmp(dl, "true")) return Upscaler::Dlss;
+    if (hx && !strcmp(xe, "true")) return Upscaler::Xess;
+    if (hf && fs[0] && strcmp(fs, "0") && strcmp(fs, "false")) return Upscaler::Fsr3;
+    if (ht && !strcmp(ta, "true")) return Upscaler::Taa;
+    if (hd && hf && hx && ht) return Upscaler::Off;
+    return Upscaler::Keep;
+}
+
+bool FrameGenOn(const char* xml) {
+    char m[16];
+    if (ReadAttr(xml, "frame_gen", "mode", m, sizeof(m)) && m[0] && strcmp(m, "0") && strcmp(m, "false"))
+        return true;
+    return ReadAttr(xml, "multi_frame_gen", "value", m, sizeof(m)) && atoi(m) >= 2;
+}
+
+Upscaler FrameGenGuard(const char* xml, Upscaler up) {
+    if (up == Upscaler::Keep || !FrameGenOn(xml)) return up;
+    return FileUpscaler(xml) == up ? up : Upscaler::Keep;
+}
+
 }  // namespace profile

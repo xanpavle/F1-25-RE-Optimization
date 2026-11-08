@@ -4,7 +4,7 @@ A runtime renderer optimisation for **F1 25** (EGO engine, Codemasters / EA), bu
 by reverse-engineering the shipped executable. It makes the renderer do **less work
 for the same look** — no `F1_25.exe` bytes are patched on disk.
 
-**v0.3.4** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
+**v0.3.5** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
 
 Built and tested on a single machine, offline, single-player.
 
@@ -68,6 +68,17 @@ raster/RT delta adds the rest. Numbers are from a single machine and will vary.
 > with `benchmark\Benchmark_*.xml` on your own machine.
 
 ---
+
+## What changed in v0.3.5
+
+- **Gaming laptops are tuned for the real GPU.** On hybrid laptops the mod used
+  to see only the CPU's integrated graphics (Windows often hides the NVIDIA card
+  from the display list), so Recommended picked Potato and Auto skipped DLSS.
+  It now finds the render-only GPU too, and logs every adapter it found.
+- **Frame generation stays on.** With frame generation on in your settings, the
+  mod keeps your upscaler, because switching it can turn frame generation off.
+- **Recommended also looks at your resolution.** A Balanced-tier GPU at 1440p,
+  3440x1440 or 4K gets Potato; Quality-tier GPUs are not stepped down.
 
 ## What changed in v0.3.4
 
@@ -651,4 +662,4 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
 MIT — see [LICENSE](LICENSE). Provided "as is", without warranty; see the disclaimer
 above.
 
-Version **0.3.4** - changes in [CHANGELOG.md](CHANGELOG.md).
+Version **0.3.5** - changes in [CHANGELOG.md](CHANGELOG.md).

@@ -31,7 +31,7 @@ echo == tunetest ==
 
 echo.
 echo == gputest ==
-"%OUT%\gputest.exe"
+"%OUT%\gputest.exe" || goto :fail
 echo.
 echo == enforcetest ==
 "%OUT%\enforcetest.exe" || goto :fail

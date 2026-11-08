@@ -5,6 +5,33 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.3.5] - 2026-11-08
+
+From the first 0.3.4 logs.
+
+### Fixed
+
+- **Gaming laptops were tuned for the CPU's graphics instead of the GPU.** On a
+  hybrid laptop (for example an RTX 3050 Laptop GPU with AMD or Intel graphics
+  in the CPU) Windows often leaves the NVIDIA card out of the display list, so
+  the mod saw only the integrated graphics: Recommended then picked Potato and
+  Auto left the upscaler alone. Detection now also reads the video device map
+  (present adapters only, safe at DLL load), finds the render-only GPU and picks
+  it. The log lists every adapter it found.
+- **Frame generation is never switched off by the upscaler.** In F1 25 frame
+  generation belongs to the upscaler; when your settings have frame generation
+  on, the mod now keeps your upscaler instead of switching to another one
+  (switching can turn frame generation off and cost far more fps than it
+  gains). The log says when this happens.
+
+### Changed
+
+- **Recommended also looks at your resolution.** A GPU in the Balanced tier at
+  1440p or more (3.5 megapixels and up, including 3440x1440 and 4K) gets
+  Potato, because those resolutions cost far more GPU time. Quality-tier GPUs
+  are not stepped down. The log says the tier and the resolution.
+- Version `0.3.5` in the DLL, installer output and docs.
+
 ## [0.3.4] - 2026-11-08
 
 ### Fixed

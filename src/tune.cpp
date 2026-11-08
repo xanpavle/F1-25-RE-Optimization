@@ -54,6 +54,8 @@ char      g_upscaler_mode[16] = "auto";
 bool      g_unknown_build_off = false;
 profile::Preset g_preset    = profile::Preset::Balanced;
 bool      g_preset_recommended = true;
+char      g_gpu_seen[512] = "";
+int       g_res_w = 0, g_res_h = 0;
 bool      g_crash_guard     = true;
 gpu::Info g_gpu             = {};
 bool      g_gpu_ready       = false;
@@ -451,6 +453,20 @@ void ResetLog() {
     LeaveCriticalSection(&g_cs);
 }
 
+// The game's resolution from the player's settings file (0 x 0 when unknown).
+void GameResolution(int* w, int* h) {
+    *w = *h = 0;
+    wchar_t docs[MAX_PATH] = {0};
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_PERSONAL, nullptr, 0, docs))) return;
+    wchar_t path[MAX_PATH];
+    _snwprintf(path, MAX_PATH, L"%s\\My Games\\F1 25\\hardwaresettings\\hardware_settings_config.xml", docs);
+    static char buf[1 << 16];
+    if (!ReadFileAll(path, buf, sizeof(buf))) return;
+    char v[16];
+    if (profile::ReadAttr(buf, "resolution", "width", v, sizeof(v))) *w = atoi(v);
+    if (profile::ReadAttr(buf, "resolution", "height", v, sizeof(v))) *h = atoi(v);
+}
+
 const char* UpName(profile::Upscaler up) {
     switch (up) {
         case profile::Upscaler::Taa:  return "TAA";
@@ -551,9 +567,12 @@ void Init() {
     ParseIni(buf);
     BuildIndex();
 
-    g_gpu = gpu::Detect();
+    g_gpu = gpu::Detect(g_gpu_seen, sizeof(g_gpu_seen));
     g_gpu_ready = true;
-    if (g_preset_recommended) g_preset = gpu::Recommend(g_gpu);
+    if (g_preset_recommended) {
+        GameResolution(&g_res_w, &g_res_h);
+        g_preset = gpu::RecommendAt(g_gpu, g_res_w, g_res_h);
+    }
 
     _snwprintf(g_log_path, MAX_PATH, L"%s\\f125_tune.log", exe);
     ResetLog();
@@ -788,7 +807,8 @@ bool ApplyProfile() {
     }
 
     const gpu::Info& g = Gpu();
-    const profile::Upscaler up = ChooseUpscaler(g);
+    const profile::Upscaler want = ChooseUpscaler(g);
+    const profile::Upscaler up = profile::FrameGenGuard(in, want);
     const bool first = !g_header_done;
     g_header_done = true;
 
@@ -805,6 +825,13 @@ bool ApplyProfile() {
                   LowVram() ? "on" : "off");
         line[sizeof(line) - 1] = 0;
         Note(line);
+        {
+            char adapters[600];
+            _snprintf(adapters, sizeof(adapters), "header: adapters found: %s",
+                      g_gpu_seen[0] ? g_gpu_seen : "none listed");
+            adapters[sizeof(adapters) - 1] = 0;
+            Note(adapters);
+        }
         _snprintf(line, sizeof(line),
                   "header: preset %s -> %s | enforce %s (raise %s) | upscaler %s -> %s | "
                   "crash safe mode %s",
@@ -849,8 +876,17 @@ bool ApplyProfile() {
             line[sizeof(line) - 1] = 0;
             Note(line);
         }
-        if (g.integrated && up == profile::Upscaler::Keep)
+        if (g.integrated && up == profile::Upscaler::Keep && want == profile::Upscaler::Keep)
             Note("note: integrated GPU, so upscaler auto leaves your in-game choice alone");
+        if (want != up) {
+            _snprintf(line, sizeof(line),
+                      "note: frame generation is on with your %s, so the upscaler stays as you set it "
+                      "instead of %s (switching it can turn frame generation off and cost more fps "
+                      "than it gains)",
+                      UpName(profile::FileUpscaler(in)), UpName(want));
+            line[sizeof(line) - 1] = 0;
+            Note(line);
+        }
     }
 
     char upLine[160];
@@ -867,9 +903,19 @@ bool ApplyProfile() {
     }
 
     {
-        char line[96];
-        _snprintf(line, sizeof(line), "preset: %s%s", profile::PresetName(g_preset),
-                  g_preset_recommended ? " (recommended for this GPU)" : "");
+        char line[200];
+        char why[96] = "";
+        if (g_preset_recommended) {
+            const profile::Preset tier = gpu::Recommend(g);
+            if (tier != g_preset)
+                _snprintf(why, sizeof(why), " (recommended: GPU tier %s, one step down for %dx%d)",
+                          profile::PresetName(tier), g_res_w, g_res_h);
+            else
+                _snprintf(why, sizeof(why), " (recommended: GPU tier %s at %dx%d)",
+                          profile::PresetName(tier), g_res_w, g_res_h);
+            why[sizeof(why) - 1] = 0;
+        }
+        _snprintf(line, sizeof(line), "preset: %s%s", profile::PresetName(g_preset), why);
         line[sizeof(line) - 1] = 0;
         Note(line);
     }

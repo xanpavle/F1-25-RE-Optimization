@@ -149,6 +149,32 @@ int main(int argc, char** argv) {
         fails += Expect("q+tgt+6GB", "<rt_ao enabled=\"false\"", true);
     }
 
+    // --- 0.3.5: frame generation keeps the file's upscaler ---
+    {
+        const char* fsrFg = "<frame_gen mode=\"3\" />\n<multi_frame_gen value=\"0\" />\n"
+                            "<antialiasing taa=\"false\" cas=\"1\" dlss=\"false\" fsr3=\"1\" xess=\"false\" />";
+        const char* dlssMfg = "<frame_gen mode=\"1\" />\n<multi_frame_gen value=\"3\" />\n"
+                              "<antialiasing taa=\"false\" cas=\"1\" dlss=\"true\" fsr3=\"0\" xess=\"false\" />";
+        const char* noFg = "<frame_gen mode=\"0\" />\n<multi_frame_gen value=\"1\" />\n"
+                           "<antialiasing taa=\"true\" cas=\"1\" dlss=\"false\" fsr3=\"0\" xess=\"false\" />";
+        using profile::Upscaler;
+        struct { const char* name; bool ok; } c[] = {
+            {"file fsr3", profile::FileUpscaler(fsrFg) == Upscaler::Fsr3},
+            {"file dlss", profile::FileUpscaler(dlssMfg) == Upscaler::Dlss},
+            {"file taa", profile::FileUpscaler(noFg) == Upscaler::Taa},
+            {"fg on/off", profile::FrameGenOn(fsrFg) && profile::FrameGenOn(dlssMfg) && !profile::FrameGenOn(noFg)},
+            {"fsr fg + dlss -> keep", profile::FrameGenGuard(fsrFg, Upscaler::Dlss) == Upscaler::Keep},
+            {"fsr fg + fsr3 -> fsr3", profile::FrameGenGuard(fsrFg, Upscaler::Fsr3) == Upscaler::Fsr3},
+            {"dlss mfg + dlss -> dlss", profile::FrameGenGuard(dlssMfg, Upscaler::Dlss) == Upscaler::Dlss},
+            {"dlss mfg + off -> keep", profile::FrameGenGuard(dlssMfg, Upscaler::Off) == Upscaler::Keep},
+            {"no fg + dlss -> dlss", profile::FrameGenGuard(noFg, Upscaler::Dlss) == Upscaler::Dlss},
+        };
+        for (auto& x : c) {
+            printf("  [%s] %s\n", x.ok ? "ok  " : "FAIL", x.name);
+            fails += x.ok ? 0 : 1;
+        }
+    }
+
     printf(fails ? "PRESETTEST FAILED\n" : "PRESETTEST PASSED\n");
     return fails ? 1 : 0;
 }

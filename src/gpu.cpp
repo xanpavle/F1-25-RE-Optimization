@@ -234,6 +234,28 @@ profile::Preset Recommend(const Info& g) {
     return profile::Preset::Balanced;
 }
 
+profile::Preset RecommendAt(const Info& g, int width, int height) {
+    const profile::Preset p = Recommend(g);
+    if (p == profile::Preset::Balanced && g.vendor != VendorUnknown && width > 0 && height > 0 &&
+        (long long)width * height >= 3500000)
+        return profile::Preset::Potato;
+    return p;
+}
+
+Info Pick(const Info* c, int n) {
+    Info best;
+    memset(&best, 0, sizeof(best));
+    int bestScore = 0;
+    for (int i = 0; i < n; ++i) {
+        const int s = ScoreOf(c[i]);
+        if (s > bestScore || (s == bestScore && s > 0 && c[i].vramMb > best.vramMb)) {
+            bestScore = s;
+            best = c[i];
+        }
+    }
+    return best;
+}
+
 const char* VendorName(Vendor v) {
     switch (v) {
         case VendorNvidia: return "NVIDIA";
@@ -243,71 +265,93 @@ const char* VendorName(Vendor v) {
     }
 }
 
-Info Detect() {
-    Info best;
-    memset(&best, 0, sizeof(best));
-    int bestScore = -1;
+Info Detect(char* seen, size_t seenCap) {
+    Info cands[16];
+    int n = 0;
+    auto add = [&](Vendor v, const wchar_t* name, unsigned vram) {
+        if (n >= 16 || v == VendorUnknown || !name || !*name) return;
+        if (WContainsNoCase(name, L"microsoft basic") || WContainsNoCase(name, L"remote")) return;
+        Info c = Make(v, name);
+        Finish(c, vram);
+        for (int i = 0; i < n; ++i) {
+            if (!strcmp(cands[i].name, c.name)) {
+                if (!cands[i].vramMb && c.vramMb) cands[i] = c;
+                return;
+            }
+        }
+        cands[n++] = c;
+    };
 
+    // 1. The video device map (0.3.5). HARDWARE is rebuilt at every boot, so it holds
+    // only adapters present now, including a GPU with no screen attached (the NVIDIA
+    // card of a hybrid laptop), which EnumDisplayDevicesW often leaves out.
+    {
+        HKEY map;
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"HARDWARE\\DEVICEMAP\\VIDEO", 0, KEY_READ, &map) ==
+            ERROR_SUCCESS) {
+            for (DWORD i = 0; i < 64; ++i) {
+                wchar_t name[64], val[512];
+                DWORD nameLen = 64, valBytes = sizeof(val) - sizeof(wchar_t), type = 0;
+                memset(val, 0, sizeof(val));
+                const LONG r = RegEnumValueW(map, i, name, &nameLen, nullptr, &type, (LPBYTE)val, &valBytes);
+                if (r == ERROR_NO_MORE_ITEMS) break;
+                if (r != ERROR_SUCCESS || type != REG_SZ) continue;
+                const wchar_t kPrefix[] = L"\\Registry\\Machine\\";
+                const size_t pl = wcslen(kPrefix);
+                if (_wcsnicmp(val, kPrefix, pl) != 0) continue;
+                HKEY k;
+                if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, val + pl, 0, KEY_READ, &k) != ERROR_SUCCESS) continue;
+                wchar_t desc[256];
+                if (ReadDesc(k, desc, sizeof(desc))) add(FromName(desc), desc, VramOfKey(k));
+                RegCloseKey(k);
+            }
+            RegCloseKey(map);
+        }
+    }
+
+    // 2. Adapters attached to the desktop.
     DISPLAY_DEVICEW dd;
     for (DWORD i = 0;; ++i) {
         memset(&dd, 0, sizeof(dd));
         dd.cb = sizeof(dd);
         if (!EnumDisplayDevicesW(nullptr, i, &dd, 0)) break;
-
-        if (WContainsNoCase(dd.DeviceString, L"microsoft basic")) continue;
-        if (WContainsNoCase(dd.DeviceString, L"remote")) continue;
-
         Vendor v = FromId(dd.DeviceID);
         if (v == VendorUnknown) v = FromName(dd.DeviceString);
-        if (v == VendorUnknown) continue;
-
-        Info cand = Make(v, dd.DeviceString);
-        Finish(cand, VramFor(dd.DeviceString));
-        const int score = ScoreOf(cand);
-        if (score > bestScore) {
-            bestScore = score;
-            best = cand;
-        }
+        add(v, dd.DeviceString, VramFor(dd.DeviceString));
     }
 
-    if (bestScore < 0) {
-        // Fallback: the display-adapter class key. Covers sessions where the
-        // display devices are not enumerable (remote/VM, some laptops).
+    // 3. Nothing found: the display-adapter class key (remote / VM sessions).
+    if (n == 0) {
         HKEY root;
-        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-                          L"SYSTEM\\CurrentControlSet\\Control\\Class\\"
-                          L"{4d36e968-e325-11ce-bfc1-08002be10318}",
-                          0, KEY_READ, &root) == ERROR_SUCCESS) {
-            wchar_t sub[16];
-            for (int i = 0; i < 16; ++i) {
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kClassKey, 0, KEY_READ, &root) == ERROR_SUCCESS) {
+            wchar_t sub[16], desc[256];
+            for (int i = 0; i < 32; ++i) {
                 _snwprintf(sub, 16, L"%04d", i);
                 HKEY k;
                 if (RegOpenKeyExW(root, sub, 0, KEY_READ, &k) != ERROR_SUCCESS) continue;
-
-                wchar_t desc[256];
-                memset(desc, 0, sizeof(desc));
-                DWORD cb = sizeof(desc);
-                DWORD type = 0;
-                if (RegQueryValueExW(k, L"DriverDesc", nullptr, &type,
-                                     (LPBYTE)desc, &cb) == ERROR_SUCCESS) {
-                    const Vendor v = FromName(desc);
-                    if (v != VendorUnknown) {
-                        Info cand = Make(v, desc);
-                        Finish(cand, VramOfKey(k));
-                        const int score = ScoreOf(cand);
-                        if (score > bestScore) {
-                            bestScore = score;
-                            best = cand;
-                        }
-                    }
-                }
+                if (ReadDesc(k, desc, sizeof(desc))) add(FromName(desc), desc, VramOfKey(k));
                 RegCloseKey(k);
             }
             RegCloseKey(root);
         }
     }
 
-    return best;
+    if (seen && seenCap) {
+        seen[0] = 0;
+        size_t used = 0;
+        for (int i = 0; i < n && used + 1 < seenCap; ++i) {
+            const int w = _snprintf(seen + used, seenCap - used, "%s%s (%u MB%s)", i ? ", " : "",
+                                    cands[i].name, cands[i].vramMb,
+                                    cands[i].integrated ? ", integrated" : "");
+            if (w < 0) {
+                seen[seenCap - 1] = 0;
+                break;
+            }
+            used += (size_t)w;
+        }
+        seen[seenCap - 1] = 0;
+    }
+    return Pick(cands, n);
 }
 
 }  // namespace gpu
