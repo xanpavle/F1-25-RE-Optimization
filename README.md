@@ -4,7 +4,7 @@ A runtime renderer optimisation for **F1 25** (EGO engine, Codemasters / EA), bu
 by reverse-engineering the shipped executable. It makes the renderer do **less work
 for the same look** — no `F1_25.exe` bytes are patched on disk.
 
-**v0.3.2** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
+**v0.3.3** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
 
 Built and tested on a single machine, offline, single-player.
 
@@ -69,6 +69,19 @@ raster/RT delta adds the rest. Numbers are from a single machine and will vary.
 
 ---
 
+## What changed in v0.3.3
+
+A small follow-up from the first 0.3.2 Send Logs. The crashes in those logs
+happened just as often with the mod off, so none is pinned on the mod.
+
+- **VRAM guard now covers 6 GB cards and smaller** (8 GB cards handle the tuned
+  values fine). On those cards, ray-traced AO and DDGI are also never switched
+  on, even by the Quality preset in `target` mode.
+- **Potato no longer changes the sky shadow cascade count**: below 4 it is a
+  known crash risk and saves almost nothing.
+- **Clearer log line when a stock launch crashed too**: the crash is then likely
+  not this mod.
+
 ## What changed in v0.3.2
 
 Fixes from the players' **Send Logs** data. The headline numbers above are
@@ -85,7 +98,7 @@ unchanged; this release is about the PCs where the mod did not help.
   saved. A discrete card is always picked over the CPU's graphics.
 - **Potato is never heavier than Balanced.** Its cloud setting was the Ultra value;
   fixed, and a test now checks every Potato value against Balanced.
-- **VRAM guard.** On 8 GB cards and integrated graphics, memory-heavy settings
+- **VRAM guard.** On 6 GB cards (8 GB before 0.3.3) and integrated graphics, memory-heavy settings
   (shadow maps, fog maps, car reflections, texture streaming) are never raised,
   even in `target` mode.
 - **Recommended preset** is the new default: picked from your GPU and its VRAM at
@@ -632,4 +645,4 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
 MIT — see [LICENSE](LICENSE). Provided "as is", without warranty; see the disclaimer
 above.
 
-Version **0.3.2** - changes in [CHANGELOG.md](CHANGELOG.md).
+Version **0.3.3** - changes in [CHANGELOG.md](CHANGELOG.md).

@@ -647,7 +647,7 @@ int DetourParseInt(const char* value, int def, int flags) {
             // `target`: the mod defines the quality level, so the tuned value wins
             // even if the engine's preset is lower. `cheaper`: only ever remove
             // work (the tuned value is a ceiling).
-            // 0.3.2: on 8 GB or less (or integrated), memory-heavy sites never
+            // 0.3.3: on 6 GB or less (or integrated), memory-heavy sites never
             // raise, even in target.
             const int tuned = (int)g_enf[i].value;
             const bool raise = tune::EnforceTarget() &&

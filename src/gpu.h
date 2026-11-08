@@ -36,7 +36,7 @@ Info Classify(Vendor v, const wchar_t* name);
 // Name-only guess at integrated graphics (a card with >= 6 GB VRAM never is).
 bool IntegratedByName(Vendor v, const wchar_t* name);
 
-// 8 GB or less (when known), or integrated.
+// 6 GB or less (when known), or integrated.
 bool LowVram(const Info& g);
 
 // The preset "recommended" resolves to for this GPU.

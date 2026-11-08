@@ -50,7 +50,7 @@ bool PresetIsRecommended();
 
 // The GPU detected once at Init (vendor, model, integrated, VRAM).
 const gpu::Info& Gpu();
-// 8 GB or less, or integrated: memory-heavy settings never raise, even in target.
+// 6 GB or less, or integrated: memory-heavy settings never raise, even in target.
 bool LowVram();
 
 // Crash safe mode ([profile] crash_safe_mode = 1, default). Call once at startup:

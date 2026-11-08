@@ -42,7 +42,7 @@ struct Options {
     // or less than the value already in the file. true (enforce_mode = target):
     // tuned values may raise a setting.
     bool     allowRaise = false;
-    // 8 GB or less, or integrated: memory-heavy settings never raise, even in target.
+    // 6 GB or less, or integrated: memory-heavy settings never raise, even in target.
     bool     lowVram = false;
     ChangeFn onChange = nullptr;
     void*    user = nullptr;

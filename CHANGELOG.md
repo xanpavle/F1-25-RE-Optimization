@@ -5,6 +5,26 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.3.3] - 2026-11-08
+
+**Follow-up from the first 0.3.2 Send Logs.** Crashes in those logs happened
+just as often with the mod off, so none is pinned on the mod; these are the
+fixes the data pointed at.
+
+### Changed
+
+- **VRAM guard is now for 6 GB or less** (was 8 GB). 8 GB cards handle the
+  tuned values fine; 6 GB and smaller cards, and integrated graphics, still
+  never get memory-heavy settings raised.
+- **Ray-traced AO and DDGI are never switched on for a 6 GB or smaller card**,
+  even with the Quality preset in `target` mode (seen on an RTX 2060 6 GB).
+- **Potato no longer writes `skyShadowCascadeCount = 2`.** Below 4 it is a
+  known crash risk in-engine, and it saves almost nothing.
+- **Clearer crash safe mode line** when the stock launch crashed too: "the
+  last launch crashed with the mod OFF too, so the crash is likely not this
+  mod (check other mods, drivers or the game)".
+- Version `0.3.3` in the DLL, installer output and docs.
+
 ## [0.3.2] - 2026-11-07
 
 **Fixes from the players' Send Logs data: the mod no longer makes any setting

@@ -134,6 +134,21 @@ int main(int argc, char** argv) {
            compared);
     fails += above == 0 && compared >= 20 ? 0 : 1;
 
+    // --- 0.3.3: Potato leaves the sky cascade count alone; low VRAM never turns RT on ---
+    profile::Transform(g_in, g_out, sizeof(g_out), profile::Upscaler::Keep, profile::Preset::Potato);
+    fails += Expect("potato", "skyShadowCascadeCount=\"4\"", true);
+    {
+        // `low` already has rt_ao off (set above).
+        profile::Options q;
+        q.preset = profile::Preset::Quality;
+        q.allowRaise = true;
+        profile::Transform(low, g_out, sizeof(g_out), q);
+        fails += Expect("q+target", "<rt_ao enabled=\"true\"", true);
+        q.lowVram = true;
+        profile::Transform(low, g_out, sizeof(g_out), q);
+        fails += Expect("q+tgt+6GB", "<rt_ao enabled=\"false\"", true);
+    }
+
     printf(fails ? "PRESETTEST FAILED\n" : "PRESETTEST PASSED\n");
     return fails ? 1 : 0;
 }

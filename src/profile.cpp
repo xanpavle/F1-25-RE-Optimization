@@ -111,7 +111,8 @@ const Ov kPotato[] = {
     {"postprocess", "lensFlare", "false"},
     {"postprocess", "motionBlur", "false"},
     {"shadows", "skyShadowMapSize", "1024"},
-    {"shadows", "skyShadowCascadeCount", "2"},
+    // skyShadowCascadeCount is not changed (0.3.3): below 4 it is a known crash
+    // risk in-engine and saves almost nothing.
     {"shadows", "skyShadowLowLod", "true"},
     {"shadows", "worldShadowMapSize", "1024"},
     {"shadows", "nightShadowMapSize", "1024"},
@@ -323,6 +324,8 @@ bool MemoryHeavy(const char* tag, const char* attr) {
         return !strcmp(attr, "envMapScale") || !strcmp(attr, "cubeMapScale") ||
                !strcmp(attr, "cubeMapEnabled");
     if (!strcmp(tag, "texture_streaming")) return true;
+    // Ray-traced passes are never switched on for a low-VRAM GPU either (0.3.3).
+    if (!strncmp(tag, "rt_", 3)) return !strcmp(attr, "enabled");
     return false;
 }
 

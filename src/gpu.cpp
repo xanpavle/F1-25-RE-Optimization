@@ -210,7 +210,8 @@ bool IntegratedByName(Vendor v, const wchar_t* name) {
 }
 
 bool LowVram(const Info& g) {
-    return g.integrated || (g.vramMb > 0 && g.vramMb <= 8448);
+    // 6 GB cards report 6144 MB; 8 GB cards handle the tuned values fine (0.3.3).
+    return g.integrated || (g.vramMb > 0 && g.vramMb <= 6400);
 }
 
 profile::Preset Recommend(const Info& g) {

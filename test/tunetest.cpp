@@ -91,7 +91,9 @@ int main(void) {
     gpu::Info v8 = Classify(gpu::VendorNvidia, L"NVIDIA GeForce RTX 3070");
     T("unknown VRAM not low", !gpu::LowVram(v8));
     v8.vramMb = 8192;
-    T("8 GB low", gpu::LowVram(v8));
+    T("8 GB not low (0.3.3)", !gpu::LowVram(v8));
+    v8.vramMb = 6144;
+    T("6 GB low", gpu::LowVram(v8));
     v8.vramMb = 12288;
     T("12 GB not low", !gpu::LowVram(v8));
     auto R = [](gpu::Vendor v, const wchar_t* n, unsigned vram) {

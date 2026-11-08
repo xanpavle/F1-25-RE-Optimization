@@ -1070,7 +1070,8 @@ bool SafeStart(const SafeState& prev, SafeState* write, const char** why) {
     }
     if (prev.kind == 2) {
         *write = {1, 0, 0};
-        *why = "the last stock launch also crashed, so the crash was not caused by the mod; the "
+        *why = "the last launch crashed with the mod OFF too, so the crash is likely not this mod "
+               "(check other mods, drivers or the game); the "
                "mod is on again";
         return false;
     }
