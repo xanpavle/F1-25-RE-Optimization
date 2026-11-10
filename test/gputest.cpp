@@ -81,9 +81,35 @@ static void Test036() {
     Check(!strcmp(pt, "no battery (desktop)") && !sys::PowerNote(desk), "power: desktop, no note");
 }
 
+// 0.3.7: adaptive VRAM guard.
+static void Test037() {
+    sys::VramMemory m = sys::VramParse("165 8151\r\n");
+    Check(m.pct == 165 && m.vramMb == 8151, "vram memory parses");
+    Check(sys::VramParse("x").pct == 0, "bad text: no memory");
+    char t[48];
+    sys::VramFormat(m, t, sizeof(t));
+    Check(sys::VramParse(t).pct == 165, "vram memory round trip");
+    Check(sys::VramTight(m, 8151) && !sys::VramTight(m, 12227), "guard on for the same card only");
+    sys::VramMemory none = {0, 0};
+    sys::VramMemory a1 = sys::VramAfter(none, false, 157, 8151);
+    Check(sys::VramTight(a1, 8151), "over budget -> guard next launch");
+    sys::VramMemory a2 = sys::VramAfter(a1, true, 92, 8151);
+    Check(sys::VramTight(a2, 8151), "guard on at 92%: stays");
+    sys::VramMemory a3 = sys::VramAfter(a2, true, 60, 8151);
+    Check(!sys::VramTight(a3, 8151), "guard on at 60%: off next launch");
+    Check(!sys::VramTight(sys::VramAfter(none, false, 51, 20464), 20464), "never over: off");
+    profile::Entry e[128];
+    int n = profile::Entries(profile::Preset::Balanced, e, 128, false, false, true);
+    Check(!strcmp(EntryVal(e, n, "shadows", "worldShadowMapSize"), "1024"), "guard: shadow maps 1024");
+    Check(!strcmp(EntryVal(e, n, "texture_streaming", "texelDensityBias"), "1.0"), "guard: textures at potato");
+    Check(!strcmp(EntryVal(e, n, "lighting", "volumetricFogMapWidth"), "256"), "guard: fog map 256");
+    Check(!strcmp(EntryVal(e, n, "ssao", "algorithm"), "1"), "guard: GPU-time effects stay balanced");
+}
+
 int main(void) {
     Test035();
     Test036();
+    Test037();
     char seen[512];
     const gpu::Info g = gpu::Detect(seen, sizeof(seen));
     printf("found  : %s\n", seen);

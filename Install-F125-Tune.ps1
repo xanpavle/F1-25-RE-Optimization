@@ -210,7 +210,7 @@ switch ($Action) {
         Write-Host 'Next:'
         Write-Host '  1) Launch F1 25 offline (single-player).'
         Write-Host "  2) Open $game\f125_tune.log - it should contain"
-        Write-Host '       [mod] F1 25 RE-Optimization v0.3.6'
+        Write-Host '       [mod] F1 25 RE-Optimization v0.3.7'
         Write-Host '       [mod] header: GPU ... | VRAM ...'
         Write-Host '       [mod] preset: ...'
         Write-Host '       [mod] hooks installed OK'
@@ -224,7 +224,7 @@ switch ($Action) {
     'Uninstall' {
         $removed = 0
         try {
-            foreach ($f in @('dinput8.dll', 'f125_tune.ini', 'f125_tune.log', 'f125_ab_stock.txt', 'f125_last_preset.txt', 'f125_launch_state.txt')) {
+            foreach ($f in @('dinput8.dll', 'f125_tune.ini', 'f125_tune.log', 'f125_ab_stock.txt', 'f125_last_preset.txt', 'f125_launch_state.txt', 'f125_vram.txt')) {
                 $p = Join-Path $game $f
                 if (Test-Path $p) {
                     Remove-Item $p -Force

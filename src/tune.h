@@ -64,6 +64,9 @@ void ConfirmLaunch(const char* how);
 // 0.3.6: records a clean exit (DLL_PROCESS_DETACH on ExitProcess), so the next
 // launch can log "the last launch quit cleanly". Writes the state file only.
 void MarkCleanExit();
+// 0.3.7: measures the game's video memory (DXGI) and stores the result for the
+// adaptive VRAM guard of the next launch. Call from a worker thread, not DllMain.
+void VramCheck(const char* when);
 
 // Puts the player's own values back for every attribute the mod owns (from the
 // .untuned copy), leaving resolution and everything else as it is now.

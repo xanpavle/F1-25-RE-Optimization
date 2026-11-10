@@ -2,6 +2,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <dxgi1_4.h>
 #include <cpuid.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -137,6 +138,78 @@ const char* WineVersion() {
     typedef const char* (*Fn)();
     Fn f = (Fn)(void*)GetProcAddress(nt, "wine_get_version");
     return f ? f() : nullptr;
+}
+
+bool VramUsage(unsigned long long* used, unsigned long long* budget) {
+    HMODULE dxgi = LoadLibraryW(L"dxgi.dll");
+    if (!dxgi) return false;
+    typedef HRESULT(WINAPI * CreateFn)(REFIID, void**);
+    CreateFn create = (CreateFn)(void*)GetProcAddress(dxgi, "CreateDXGIFactory1");
+    IDXGIFactory1* factory = nullptr;
+    bool ok = false;
+    if (create && SUCCEEDED(create(__uuidof(IDXGIFactory1), (void**)&factory)) && factory) {
+        IDXGIAdapter1* best = nullptr;
+        SIZE_T bestMem = 0;
+        IDXGIAdapter1* a = nullptr;
+        for (UINT i = 0; factory->EnumAdapters1(i, &a) != DXGI_ERROR_NOT_FOUND; ++i) {
+            DXGI_ADAPTER_DESC1 d;
+            if (SUCCEEDED(a->GetDesc1(&d)) && !(d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) &&
+                d.DedicatedVideoMemory > bestMem) {
+                if (best) best->Release();
+                best = a;
+                bestMem = d.DedicatedVideoMemory;
+            } else {
+                a->Release();
+            }
+        }
+        IDXGIAdapter3* a3 = nullptr;
+        if (best && SUCCEEDED(best->QueryInterface(__uuidof(IDXGIAdapter3), (void**)&a3)) && a3) {
+            DXGI_QUERY_VIDEO_MEMORY_INFO info;
+            if (SUCCEEDED(a3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info)) && info.Budget) {
+                *used = info.CurrentUsage;
+                *budget = info.Budget;
+                ok = true;
+            }
+            a3->Release();
+        }
+        if (best) best->Release();
+        factory->Release();
+    }
+    FreeLibrary(dxgi);
+    return ok;
+}
+
+VramMemory VramParse(const char* text) {
+    VramMemory m = {0, 0};
+    int pct = 0;
+    unsigned mb = 0;
+    if (text && sscanf(text, "%d %u", &pct, &mb) == 2 && pct > 0 && pct < 1000 && mb > 0 && mb < (1u << 20)) {
+        m.pct = pct;
+        m.vramMb = mb;
+    }
+    return m;
+}
+
+void VramFormat(const VramMemory& m, char* out, size_t cap) {
+    if (!cap) return;
+    _snprintf(out, cap, "%d %u\r\n", m.pct, m.vramMb);
+    out[cap - 1] = 0;
+}
+
+bool VramTight(const VramMemory& m, unsigned currentVramMb) {
+    return m.pct >= 100 && m.vramMb && currentVramMb && m.vramMb == currentVramMb;
+}
+
+VramMemory VramAfter(const VramMemory& prev, bool guardOn, int pctNow, unsigned vramMb) {
+    VramMemory m = {0, vramMb};
+    if (guardOn && pctNow < 75) {
+        m.pct = pctNow;
+        return m;
+    }
+    int keep = prev.vramMb == vramMb ? prev.pct : 0;
+    if (guardOn && keep < 100) keep = 100;
+    m.pct = pctNow > keep ? pctNow : keep;
+    return m;
 }
 
 }  // namespace sys

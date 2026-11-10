@@ -36,4 +36,21 @@ Power ReadPower();
 // The Wine version when running under Wine / Proton, else nullptr.
 const char* WineVersion();
 
+// 0.3.7: video memory this process uses and its budget, from DXGI (the adapter with
+// the most dedicated memory). Not safe at DLL load; call it from a thread.
+bool VramUsage(unsigned long long* used, unsigned long long* budget);
+
+// 0.3.7: the adaptive VRAM guard memory, kept as "<percent of budget> <VRAM MB>".
+// The guard is on when this card went over its budget (100 % or more) last launch.
+struct VramMemory {
+    int      pct;     // highest share of the budget seen, 0 when unknown
+    unsigned vramMb;
+};
+VramMemory VramParse(const char* text);
+void VramFormat(const VramMemory& m, char* out, size_t cap);
+bool VramTight(const VramMemory& m, unsigned currentVramMb);
+// What to store after a check measured pctNow: the highest seen. A launch with the
+// guard on keeps it unless it measured well under budget (below 75 %).
+VramMemory VramAfter(const VramMemory& prev, bool guardOn, int pctNow, unsigned vramMb);
+
 }  // namespace sys

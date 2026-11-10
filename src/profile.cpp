@@ -239,7 +239,24 @@ const Ov kTinyVram[] = {
     {"texture_streaming", "texelDensityBias", "1.0"},
 };
 
-int Merge(Preset p, Entry* out, int cap, bool weakCpu = false, bool tinyVram = false) {
+// 0.3.7: the game went over its video memory budget last launch. Potato's sizes
+// for everything that holds video memory; effects that cost only GPU time stay.
+const Ov kVramTight[] = {
+    {"texture_streaming", "texelDensityBias", "1.0"},
+    {"shadows", "worldShadowMapSize", "1024"},
+    {"shadows", "nightShadowMapSize", "1024"},
+    {"shadows", "skyShadowMapSize", "1024"},
+    {"shadows", "spotShadowMapSize", "512"},
+    {"shadows", "skyShadowMap32Bits", "false"},
+    {"lighting", "volumetricFogMapWidth", "256"},
+    {"lighting", "volumetricFogMapHeight", "128"},
+    {"vehicle_reflections", "envMapScale", "0.5"},
+    {"vehicle_reflections", "cubeMapScale", "1.0"},
+    {"weather_effects", "planarReflectionsRTScale", "0.5"},
+};
+const int kVramTightCount = (int)(sizeof(kVramTight) / sizeof(kVramTight[0]));
+
+int Merge(Preset p, Entry* out, int cap, bool weakCpu = false, bool tinyVram = false, bool vramTight = false) {
     int n = 0;
     auto put = [&](const Ov& o) {
         for (int i = 0; i < n; ++i)
@@ -266,6 +283,8 @@ int Merge(Preset p, Entry* out, int cap, bool weakCpu = false, bool tinyVram = f
     if (weakCpu)
         for (int i = 0; i < kCpuCount; ++i) lower(kCpu[i]);
     if (tinyVram) lower(kTinyVram[0]);
+    if (vramTight)
+        for (int i = 0; i < kVramTightCount; ++i) lower(kVramTight[i]);
     return n;
 }
 
@@ -336,8 +355,8 @@ const char* PresetName(Preset p) {
     }
 }
 
-int Entries(Preset p, Entry* out, int cap, bool weakCpu, bool tinyVram) {
-    return Merge(p, out, cap, weakCpu, tinyVram);
+int Entries(Preset p, Entry* out, int cap, bool weakCpu, bool tinyVram, bool vramTight) {
+    return Merge(p, out, cap, weakCpu, tinyVram, vramTight);
 }
 
 bool CheaperOrEqual(const char* tag, const char* attr, const char* original,
@@ -381,7 +400,7 @@ bool ReadAttr(const char* xml, const char* tag, const char* attr, char* out, siz
 
 size_t Transform(const char* in, char* out, size_t cap, const Options& o) {
     Entry entries[128];
-    const int ne = Merge(o.preset, entries, 128, o.weakCpu, o.tinyVram);
+    const int ne = Merge(o.preset, entries, 128, o.weakCpu, o.tinyVram, o.vramTight);
     size_t w = 0;
     const char* p = in;
     while (*p) {

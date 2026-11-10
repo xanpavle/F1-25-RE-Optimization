@@ -58,6 +58,8 @@ bool      g_preset_recommended = true;
 char      g_gpu_seen[512] = "";
 int       g_res_w = 0, g_res_h = 0;
 sys::Cpu  g_cpu             = {};
+sys::VramMemory g_vram_mem  = {0, 0};  // 0.3.7: from the last launch, updated by the checks
+bool      g_vram_tight      = false;
 bool      g_weak_cpu        = false;
 const char* g_weak_why      = nullptr;
 bool      g_crash_guard     = true;
@@ -534,6 +536,24 @@ void SessionInfo() {
 
 }  // namespace
 
+// 0.3.7: f125_vram.txt next to F1_25.exe, or in %LOCALAPPDATA%\F1 25 RE-Optimization.
+bool VramPath(wchar_t* path, bool local) {
+    if (!local) {
+        if (!g_exe_dir[0]) return false;
+        _snwprintf(path, MAX_PATH, L"%s\\f125_vram.txt", g_exe_dir);
+    } else {
+        wchar_t base[MAX_PATH] = {0};
+        if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, base))) return false;
+        wchar_t dir[MAX_PATH];
+        _snwprintf(dir, MAX_PATH, L"%s\\F1 25 RE-Optimization", base);
+        dir[MAX_PATH - 1] = 0;
+        CreateDirectoryW(dir, nullptr);
+        _snwprintf(path, MAX_PATH, L"%s\\f125_vram.txt", dir);
+    }
+    path[MAX_PATH - 1] = 0;
+    return true;
+}
+
 void Init() {
     if (!g_cs_ready) {
         InitializeCriticalSection(&g_cs);
@@ -573,6 +593,15 @@ void Init() {
 
     g_gpu = gpu::Detect(g_gpu_seen, sizeof(g_gpu_seen));
     g_gpu_ready = true;
+    {
+        wchar_t vp[MAX_PATH];
+        char vt[64] = {0};
+        bool got = false;
+        if (VramPath(vp, false)) got = ReadFileAll(vp, vt, sizeof(vt)) != 0;
+        if (!got && VramPath(vp, true)) got = ReadFileAll(vp, vt, sizeof(vt)) != 0;
+        if (got) g_vram_mem = sys::VramParse(vt);
+        g_vram_tight = g_gpu.vendor != gpu::VendorUnknown && sys::VramTight(g_vram_mem, g_gpu.vramMb);
+    }
     g_cpu = sys::ReadCpu();
     g_weak_cpu = sys::WeakCpu(g_cpu.name, g_cpu.cores, g_cpu.threads, &g_weak_why);
     if (g_preset_recommended) {
@@ -600,6 +629,14 @@ void Init() {
         Note(line);
         if (const char* pn = sys::PowerNote(pw)) {
             _snprintf(line, sizeof(line), "note: %s", pn);
+            line[sizeof(line) - 1] = 0;
+            Note(line);
+        }
+        if (g_vram_tight) {
+            _snprintf(line, sizeof(line),
+                      "VRAM guard on: the last launch used %d%% of this card's video memory budget, so textures, "
+                      "shadow maps, fog and car reflections use Potato's sizes (never above your settings)",
+                      g_vram_mem.pct);
             line[sizeof(line) - 1] = 0;
             Note(line);
         }
@@ -853,10 +890,11 @@ bool ApplyProfile() {
         vram[sizeof(vram) - 1] = 0;
         _snprintf(line, sizeof(line),
                   "header: GPU %s | vendor %s | driver %s | integrated %s | VRAM %s | low-VRAM guard %s | "
-                  "4 GB texture guard %s",
+                  "4 GB texture guard %s | VRAM guard %s",
                   g.vendor != gpu::VendorUnknown ? g.name : "not detected",
                   gpu::VendorName(g.vendor), g.driver[0] ? g.driver : "unknown",
-                  g.integrated ? "yes" : "no", vram, LowVram() ? "on" : "off", TinyVram() ? "on" : "off");
+                  g.integrated ? "yes" : "no", vram, LowVram() ? "on" : "off", TinyVram() ? "on" : "off",
+                  g_vram_tight ? "on" : "off");
         line[sizeof(line) - 1] = 0;
         Note(line);
         _snprintf(line, sizeof(line), "header: CPU %s | %d cores / %d threads | weak-CPU guard %s%s%s",
@@ -1000,6 +1038,7 @@ bool ApplyProfile() {
     opt.lowVram = LowVram();
     opt.weakCpu = g_weak_cpu;
     opt.tinyVram = TinyVram();
+    opt.vramTight = g_vram_tight;
     opt.user = &counts;
     opt.onChange = [](const char* tag, const char* attr, const char* from, const char* to,
                       bool kept, void* user) {
@@ -1053,7 +1092,36 @@ const gpu::Info& Gpu() {
 
 bool LowVram() {
     const gpu::Info& g = Gpu();
-    return g.vendor != gpu::VendorUnknown && gpu::LowVram(g);
+    return g_vram_tight || (g.vendor != gpu::VendorUnknown && gpu::LowVram(g));
+}
+
+void VramCheck(const char* when) {
+    unsigned long long used = 0, budget = 0;
+    if (!sys::VramUsage(&used, &budget)) return;
+    const int pct = (int)(used * 100 / budget);
+    char line[400];
+    _snprintf(line, sizeof(line), "VRAM check (%s): the game uses %u MB of %u MB available (%d%%)%s", when,
+              (unsigned)(used >> 20), (unsigned)(budget >> 20), pct, g_vram_tight ? ", VRAM guard on" : "");
+    line[sizeof(line) - 1] = 0;
+    Note(line);
+    const bool before = sys::VramTight(g_vram_mem, g_gpu.vramMb);
+    g_vram_mem = sys::VramAfter(g_vram_mem, g_vram_tight, pct, g_gpu.vramMb);
+    char text[48];
+    sys::VramFormat(g_vram_mem, text, sizeof(text));
+    wchar_t vp[MAX_PATH];
+    if (!(VramPath(vp, false) && WriteFileAtomic(vp, text, strlen(text))) && VramPath(vp, true))
+        WriteFileAtomic(vp, text, strlen(text));
+    if (pct >= 100 && !g_vram_tight)
+        Note("note: the game is over its video memory budget, so Windows moves textures to system RAM and frames "
+             "hitch; the VRAM guard turns on from the next launch (textures, shadow maps, fog and car reflections "
+             "at Potato's sizes)");
+    else if (pct >= 100)
+        Note("note: still over the video memory budget with the VRAM guard on; lower Texture Quality in the "
+             "game's graphics menu");
+    else if (pct >= 90)
+        Note("note: video memory is nearly full, so textures stream in late and frames can hitch");
+    if (g_vram_tight && before && !sys::VramTight(g_vram_mem, g_gpu.vramMb))
+        Note("VRAM guard: well under budget now, so the next launch tries without it");
 }
 
 bool TinyVram() {

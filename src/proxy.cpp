@@ -256,6 +256,11 @@ static bool SwoftyActive() {
 static DWORD WINAPI ConfirmThread(LPVOID) {
     Sleep(90 * 1000);
     tune::ConfirmLaunch("90 s without a crash");
+    // 0.3.7: video memory checks for the adaptive VRAM guard.
+    Sleep(90 * 1000);
+    tune::VramCheck("3 min");
+    Sleep(420 * 1000);
+    tune::VramCheck("10 min");
     return 0;
 }
 

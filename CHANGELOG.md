@@ -5,6 +5,26 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.3.7] - 2026-11-11
+
+From the first 0.3.6 logs (14 reports). No crash stack contained the mod.
+
+### Added
+
+- **Adaptive VRAM guard.** The 0.3.6 logs showed 8 GB cards (an RTX 5070
+  Laptop GPU, an RTX 3050) using 111-165 % of their video memory budget on
+  Balanced, with frames of a quarter second and more as Windows moved textures
+  to system RAM. The mod now measures the game's video memory 3 and 10 minutes
+  in. When the game went over the budget, the next launch puts textures, shadow
+  maps, fog maps and car reflections at Potato's sizes (effects that only cost
+  GPU time stay at your preset). It stays on while it is needed, and is tried
+  off again once the game fits easily (under 75 %). Never above your own
+  settings; another GPU starts fresh. The memory is kept in `f125_vram.txt`.
+
+### Changed
+
+- Version `0.3.7` in the DLL, installer output and docs.
+
 ## [0.3.6] - 2026-11-10
 
 From 46 sessions of 0.3.5 logs (22 players). No crash stack contained the mod.

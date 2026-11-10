@@ -49,6 +49,9 @@ struct Options {
     bool     weakCpu = false;
     // 0.3.6: a 4 GB card streams textures at Potato's level on any preset.
     bool     tinyVram = false;
+    // 0.3.7: the last launch measured the game over its video memory budget, so
+    // textures, shadow maps, fog maps and car reflections drop to Potato's sizes.
+    bool     vramTight = false;
     ChangeFn onChange = nullptr;
     void*    user = nullptr;
 };
@@ -95,6 +98,7 @@ struct Entry {
     const char* attr;
     const char* val;
 };
-int Entries(Preset p, Entry* out, int cap, bool weakCpu = false, bool tinyVram = false);
+int Entries(Preset p, Entry* out, int cap, bool weakCpu = false, bool tinyVram = false,
+            bool vramTight = false);
 
 }  // namespace profile
