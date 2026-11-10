@@ -52,6 +52,8 @@ bool PresetIsRecommended();
 const gpu::Info& Gpu();
 // 6 GB or less, or integrated: memory-heavy settings never raise, even in target.
 bool LowVram();
+// 0.3.6: a discrete card with 4 GB or less: Potato's texture streaming on any preset.
+bool TinyVram();
 
 // Crash safe mode ([profile] crash_safe_mode = 1, default). Call once at startup:
 // returns true when this launch must run stock because the last launch with the
@@ -59,6 +61,9 @@ bool LowVram();
 // or a clean exit).
 bool CrashGuardStart();
 void ConfirmLaunch(const char* how);
+// 0.3.6: records a clean exit (DLL_PROCESS_DETACH on ExitProcess), so the next
+// launch can log "the last launch quit cleanly". Writes the state file only.
+void MarkCleanExit();
 
 // Puts the player's own values back for every attribute the mod owns (from the
 // .untuned copy), leaving resolution and everything else as it is now.
@@ -84,12 +89,15 @@ struct SafeState {
     int kind;
     int fails;
     int hold;
+    int end;  // 0.3.6: how the launch ended: 0 unknown, 1 passed 90 s, 2 quit cleanly
 };
 // Returns true when the launch runs stock; *write is the state to store now.
 bool SafeStart(const SafeState& prev, SafeState* write, const char** why);
 SafeState SafeConfirm(const SafeState& cur);
 bool SafeParse(const char* text, const char* version, SafeState* out);
 void SafeFormat(const SafeState& s, const char* version, char* out, size_t cap);
+// 0.3.6: one log line on how the last launch ended (nullptr for a first launch).
+const char* SafeLastLaunch(const SafeState& prev);
 }
 
 // [enforce] per-attribute override of the in-engine table.

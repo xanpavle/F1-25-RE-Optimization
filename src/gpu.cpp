@@ -234,9 +234,43 @@ profile::Preset Recommend(const Info& g) {
     return profile::Preset::Balanced;
 }
 
-profile::Preset RecommendAt(const Info& g, int width, int height) {
+bool TinyVram(const Info& g) {
+    return !g.integrated && g.vramMb > 0 && g.vramMb <= 4352;
+}
+
+void DriverLabel(Vendor v, const char* ver, const char* radeon, char* out, size_t cap) {
+    if (!cap) return;
+    out[0] = 0;
+    if (v == VendorAmd && radeon && *radeon) {
+        _snprintf(out, cap, "%s", radeon);
+        out[cap - 1] = 0;
+        return;
+    }
+    if (!ver || !*ver) return;
+    if (v == VendorNvidia) {
+        // 32.0.15.6614: the last five digits of the last two fields are the release.
+        const char* dot = strchr(ver, '.');
+        dot = dot ? strchr(dot + 1, '.') : nullptr;
+        char digits[32];
+        int nd = 0;
+        if (dot)
+            for (const char* c = dot + 1; *c && nd < 31; ++c)
+                if (*c >= '0' && *c <= '9') digits[nd++] = *c;
+        digits[nd] = 0;
+        if (nd >= 5) {
+            const char* d = digits + nd - 5;
+            _snprintf(out, cap, "%d.%c%c", (d[0] - '0') * 100 + (d[1] - '0') * 10 + (d[2] - '0'), d[3], d[4]);
+            out[cap - 1] = 0;
+            return;
+        }
+    }
+    _snprintf(out, cap, "%s", ver);
+    out[cap - 1] = 0;
+}
+
+profile::Preset RecommendAt(const Info& g, int width, int height, bool weakCpu) {
     const profile::Preset p = Recommend(g);
-    if (p == profile::Preset::Balanced && g.vendor != VendorUnknown && width > 0 && height > 0 &&
+    if (p == profile::Preset::Balanced && !weakCpu && g.vendor != VendorUnknown && width > 0 && height > 0 &&
         (long long)width * height >= 3500000)
         return profile::Preset::Potato;
     return p;
@@ -265,17 +299,38 @@ const char* VendorName(Vendor v) {
     }
 }
 
+namespace {
+void ReadSz(HKEY k, const wchar_t* value, char* out, size_t cap) {
+    wchar_t w[64] = {0};
+    DWORD cb = sizeof(w) - sizeof(wchar_t), type = 0;
+    out[0] = 0;
+    if (RegQueryValueExW(k, value, nullptr, &type, (LPBYTE)w, &cb) == ERROR_SUCCESS && type == REG_SZ)
+        ToNarrow(w, out, cap);
+}
+
+// The driver version from a display-adapter driver key, as the vendor names it.
+void DriverOfKey(Vendor v, HKEY k, char* out, size_t cap) {
+    char ver[64], radeon[64];
+    ReadSz(k, L"DriverVersion", ver, sizeof(ver));
+    ReadSz(k, L"RadeonSoftwareVersion", radeon, sizeof(radeon));
+    DriverLabel(v, ver, radeon, out, cap);
+}
+}  // namespace
+
 Info Detect(char* seen, size_t seenCap) {
     Info cands[16];
     int n = 0;
-    auto add = [&](Vendor v, const wchar_t* name, unsigned vram) {
+    auto add = [&](Vendor v, const wchar_t* name, unsigned vram, const char* driver) {
         if (n >= 16 || v == VendorUnknown || !name || !*name) return;
         if (WContainsNoCase(name, L"microsoft basic") || WContainsNoCase(name, L"remote")) return;
         Info c = Make(v, name);
         Finish(c, vram);
+        _snprintf(c.driver, sizeof(c.driver), "%s", driver ? driver : "");
+        c.driver[sizeof(c.driver) - 1] = 0;
         for (int i = 0; i < n; ++i) {
             if (!strcmp(cands[i].name, c.name)) {
                 if (!cands[i].vramMb && c.vramMb) cands[i] = c;
+                if (!cands[i].driver[0] && c.driver[0]) memcpy(cands[i].driver, c.driver, sizeof(c.driver));
                 return;
             }
         }
@@ -302,7 +357,12 @@ Info Detect(char* seen, size_t seenCap) {
                 HKEY k;
                 if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, val + pl, 0, KEY_READ, &k) != ERROR_SUCCESS) continue;
                 wchar_t desc[256];
-                if (ReadDesc(k, desc, sizeof(desc))) add(FromName(desc), desc, VramOfKey(k));
+                if (ReadDesc(k, desc, sizeof(desc))) {
+                    const Vendor v = FromName(desc);
+                    char drv[48];
+                    DriverOfKey(v, k, drv, sizeof(drv));
+                    add(v, desc, VramOfKey(k), drv);
+                }
                 RegCloseKey(k);
             }
             RegCloseKey(map);
@@ -317,7 +377,7 @@ Info Detect(char* seen, size_t seenCap) {
         if (!EnumDisplayDevicesW(nullptr, i, &dd, 0)) break;
         Vendor v = FromId(dd.DeviceID);
         if (v == VendorUnknown) v = FromName(dd.DeviceString);
-        add(v, dd.DeviceString, VramFor(dd.DeviceString));
+        add(v, dd.DeviceString, VramFor(dd.DeviceString), nullptr);
     }
 
     // 3. Nothing found: the display-adapter class key (remote / VM sessions).
@@ -329,7 +389,12 @@ Info Detect(char* seen, size_t seenCap) {
                 _snwprintf(sub, 16, L"%04d", i);
                 HKEY k;
                 if (RegOpenKeyExW(root, sub, 0, KEY_READ, &k) != ERROR_SUCCESS) continue;
-                if (ReadDesc(k, desc, sizeof(desc))) add(FromName(desc), desc, VramOfKey(k));
+                if (ReadDesc(k, desc, sizeof(desc))) {
+                    const Vendor v = FromName(desc);
+                    char drv[48];
+                    DriverOfKey(v, k, drv, sizeof(drv));
+                    add(v, desc, VramOfKey(k), drv);
+                }
                 RegCloseKey(k);
             }
             RegCloseKey(root);

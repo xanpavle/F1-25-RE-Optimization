@@ -139,6 +139,17 @@ int main(void) {
                               parsed.fails == 2 && parsed.hold == 2);
     T("new version starts clean", !tune::testing::SafeParse(text, "0.3.3", &parsed) && parsed.kind == 0);
 
+    // 0.3.6: how the last launch ended survives the state file.
+    SafeState clean = {0, 0, 0, 2};
+    tune::testing::SafeFormat(clean, "0.3.6", text, sizeof(text));
+    T("clean exit round trip", tune::testing::SafeParse(text, "0.3.6", &parsed) && parsed.end == 2 &&
+                                   tune::testing::SafeLastLaunch(parsed) != nullptr);
+    T("old 4-field state parses", tune::testing::SafeParse("ok 0 0 0.3.6\r\n", "0.3.6", &parsed) &&
+                                      parsed.end == 0 && !tune::testing::SafeLastLaunch(parsed));
+    T("confirm marks 90 s", tune::testing::SafeConfirm(w).end == 1 &&
+                                tune::testing::SafeLastLaunch(tune::testing::SafeConfirm(w)) != nullptr);
+    T("pending -> early crash line", tune::testing::SafeLastLaunch(w) != nullptr);
+
     const int all = ok && map && g032;
     printf(all ? "PASS\n" : "FAIL\n");
     return all ? 0 : 1;

@@ -26,6 +26,7 @@ struct Info {
     int      model;         // 4070, 7800, 770 ... (0 when the name has none)
     bool     integrated;    // APU / iGPU: shares system memory
     unsigned vramMb;        // dedicated memory, 0 when the driver does not say
+    char     driver[48];    // 0.3.6: driver version as the vendor names it, "" when unknown
 };
 
 // Picks the "best" adapter present (discrete over integrated). Returns
@@ -45,12 +46,21 @@ bool IntegratedByName(Vendor v, const wchar_t* name);
 // 6 GB or less (when known), or integrated.
 bool LowVram(const Info& g);
 
+// 0.3.6: a discrete card with 4 GB or less (when known): textures stream at
+// Potato's level on every preset.
+bool TinyVram(const Info& g);
+
+// 0.3.6: the driver version as the vendor shows it. NVIDIA "32.0.15.6614" ->
+// "566.14"; AMD prefers the Radeon Software version; else the raw version.
+void DriverLabel(Vendor v, const char* version, const char* radeon, char* out, size_t cap);
+
 // The preset "recommended" resolves to for this GPU.
 profile::Preset Recommend(const Info& g);
 
 // 0.3.5: from the GPU and the game's resolution. A Balanced-tier GPU at 1440p or
 // more (3.5 megapixels and up) steps down to Potato; 0 x 0 means unknown.
-profile::Preset RecommendAt(const Info& g, int width, int height);
+// 0.3.6: not on a weak CPU, where the CPU is the limit and Potato only looks worse.
+profile::Preset RecommendAt(const Info& g, int width, int height, bool weakCpu = false);
 
 const char* VendorName(Vendor v);
 

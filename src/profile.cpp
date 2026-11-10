@@ -219,7 +219,27 @@ bool ParseNum(const char* v, double* out) {
     return end && *end == 0 && end != v;
 }
 
-int Merge(Preset p, Entry* out, int cap) {
+// 0.3.6: cuts that save CPU time (draw calls and simulation), for a weak CPU on
+// any preset. Merged as the cheaper of this and the preset's value.
+const Ov kCpu[] = {
+    {"crowd", "distanceScale", "0.5"},
+    {"crowd", "billboardDistance", "1000"},
+    {"particles", "rate", "0.5"},
+    {"particles", "distanceScale", "0.5"},
+    {"trees", "useLOD0", "false"},
+    {"ground_cover", "drawDistance", "60.0"},
+    {"shadows", "nightShadowCharacterCast", "false"},
+    {"shadows", "nightShadowSourceCount", "1"},
+    {"shadows", "crowdInShadows", "false"},
+};
+const int kCpuCount = (int)(sizeof(kCpu) / sizeof(kCpu[0]));
+
+// 0.3.6: a 4 GB card gets Potato's texture streaming on every preset.
+const Ov kTinyVram[] = {
+    {"texture_streaming", "texelDensityBias", "1.0"},
+};
+
+int Merge(Preset p, Entry* out, int cap, bool weakCpu = false, bool tinyVram = false) {
     int n = 0;
     auto put = [&](const Ov& o) {
         for (int i = 0; i < n; ++i)
@@ -234,6 +254,18 @@ int Merge(Preset p, Entry* out, int cap) {
         for (int i = 0; i < kQualityCount; ++i) put(kQuality[i]);
     else if (p == Preset::Potato)
         for (int i = 0; i < kPotatoCount; ++i) put(kPotato[i]);
+    // Lower only: keep the preset's value when it is already as cheap.
+    auto lower = [&](const Ov& o) {
+        for (int i = 0; i < n; ++i)
+            if (!strcmp(out[i].tag, o.tag) && !strcmp(out[i].attr, o.attr)) {
+                if (CheaperOrEqual(o.tag, o.attr, out[i].val, o.val)) out[i].val = o.val;
+                return;
+            }
+        if (n < cap) out[n++] = {o.tag, o.attr, o.val};
+    };
+    if (weakCpu)
+        for (int i = 0; i < kCpuCount; ++i) lower(kCpu[i]);
+    if (tinyVram) lower(kTinyVram[0]);
     return n;
 }
 
@@ -304,7 +336,9 @@ const char* PresetName(Preset p) {
     }
 }
 
-int Entries(Preset p, Entry* out, int cap) { return Merge(p, out, cap); }
+int Entries(Preset p, Entry* out, int cap, bool weakCpu, bool tinyVram) {
+    return Merge(p, out, cap, weakCpu, tinyVram);
+}
 
 bool CheaperOrEqual(const char* tag, const char* attr, const char* original,
                     const char* tuned) {
@@ -347,7 +381,7 @@ bool ReadAttr(const char* xml, const char* tag, const char* attr, char* out, siz
 
 size_t Transform(const char* in, char* out, size_t cap, const Options& o) {
     Entry entries[128];
-    const int ne = Merge(o.preset, entries, 128);
+    const int ne = Merge(o.preset, entries, 128, o.weakCpu, o.tinyVram);
     size_t w = 0;
     const char* p = in;
     while (*p) {

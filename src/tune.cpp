@@ -1,6 +1,7 @@
 #include "tune.h"
 #include "profile.h"
 #include "gpu.h"
+#include "sys.h"
 #include "version.h"
 #include <windows.h>
 #include <shlobj.h>
@@ -56,6 +57,9 @@ profile::Preset g_preset    = profile::Preset::Balanced;
 bool      g_preset_recommended = true;
 char      g_gpu_seen[512] = "";
 int       g_res_w = 0, g_res_h = 0;
+sys::Cpu  g_cpu             = {};
+bool      g_weak_cpu        = false;
+const char* g_weak_why      = nullptr;
 bool      g_crash_guard     = true;
 gpu::Info g_gpu             = {};
 bool      g_gpu_ready       = false;
@@ -569,15 +573,44 @@ void Init() {
 
     g_gpu = gpu::Detect(g_gpu_seen, sizeof(g_gpu_seen));
     g_gpu_ready = true;
+    g_cpu = sys::ReadCpu();
+    g_weak_cpu = sys::WeakCpu(g_cpu.name, g_cpu.cores, g_cpu.threads, &g_weak_why);
     if (g_preset_recommended) {
         GameResolution(&g_res_w, &g_res_h);
-        g_preset = gpu::RecommendAt(g_gpu, g_res_w, g_res_h);
+        g_preset = gpu::RecommendAt(g_gpu, g_res_w, g_res_h, g_weak_cpu);
     }
 
     _snwprintf(g_log_path, MAX_PATH, L"%s\\f125_tune.log", exe);
     ResetLog();
     Note(F125_MOD_NAME " v" F125_MOD_VERSION);
     SessionInfo();
+    {
+        char line[320];
+        _snprintf(line, sizeof(line), "CPU: %s, %d cores / %d threads%s%s%s",
+                  g_cpu.name[0] ? g_cpu.name : "unknown", g_cpu.cores, g_cpu.threads,
+                  g_weak_cpu ? "; weak-CPU guard on (" : "", g_weak_cpu ? g_weak_why : "",
+                  g_weak_cpu ? "): CPU-side cuts on any preset, no 1440p step-down" : "");
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+        const sys::Power pw = sys::ReadPower();
+        char pt[96];
+        sys::PowerText(pw, pt, sizeof(pt));
+        _snprintf(line, sizeof(line), "power: %s", pt);
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+        if (const char* pn = sys::PowerNote(pw)) {
+            _snprintf(line, sizeof(line), "note: %s", pn);
+            line[sizeof(line) - 1] = 0;
+            Note(line);
+        }
+        if (const char* wine = sys::WineVersion()) {
+            _snprintf(line, sizeof(line),
+                      "running under Wine / Proton %s: GPU, VRAM and driver details can differ from Windows",
+                      wine);
+            line[sizeof(line) - 1] = 0;
+            Note(line);
+        }
+    }
 }
 
 bool LookupBool(const char* name, uint8_t* out) {
@@ -819,10 +852,17 @@ bool ApplyProfile() {
         else _snprintf(vram, sizeof(vram), "unknown");
         vram[sizeof(vram) - 1] = 0;
         _snprintf(line, sizeof(line),
-                  "header: GPU %s | vendor %s | integrated %s | VRAM %s | low-VRAM guard %s",
+                  "header: GPU %s | vendor %s | driver %s | integrated %s | VRAM %s | low-VRAM guard %s | "
+                  "4 GB texture guard %s",
                   g.vendor != gpu::VendorUnknown ? g.name : "not detected",
-                  gpu::VendorName(g.vendor), g.integrated ? "yes" : "no", vram,
-                  LowVram() ? "on" : "off");
+                  gpu::VendorName(g.vendor), g.driver[0] ? g.driver : "unknown",
+                  g.integrated ? "yes" : "no", vram, LowVram() ? "on" : "off", TinyVram() ? "on" : "off");
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+        _snprintf(line, sizeof(line), "header: CPU %s | %d cores / %d threads | weak-CPU guard %s%s%s",
+                  g_cpu.name[0] ? g_cpu.name : "unknown", g_cpu.cores, g_cpu.threads,
+                  g_weak_cpu ? "on" : "off", g_weak_cpu && g_weak_why ? " - " : "",
+                  g_weak_cpu && g_weak_why ? g_weak_why : "");
         line[sizeof(line) - 1] = 0;
         Note(line);
         {
@@ -903,11 +943,16 @@ bool ApplyProfile() {
     }
 
     {
-        char line[200];
-        char why[96] = "";
+        char line[260];
+        char why[200] = "";
         if (g_preset_recommended) {
             const profile::Preset tier = gpu::Recommend(g);
-            if (tier != g_preset)
+            const profile::Preset strong = gpu::RecommendAt(g, g_res_w, g_res_h, false);
+            if (strong != g_preset)
+                _snprintf(why, sizeof(why),
+                          " (recommended: GPU tier %s at %dx%d; not stepped down: the CPU is the limit here, %s)",
+                          profile::PresetName(tier), g_res_w, g_res_h, g_weak_why ? g_weak_why : "weak CPU");
+            else if (tier != g_preset)
                 _snprintf(why, sizeof(why), " (recommended: GPU tier %s, one step down for %dx%d)",
                           profile::PresetName(tier), g_res_w, g_res_h);
             else
@@ -953,6 +998,8 @@ bool ApplyProfile() {
     opt.preset = g_preset;
     opt.allowRaise = g_enf_mode == kEnfTarget;
     opt.lowVram = LowVram();
+    opt.weakCpu = g_weak_cpu;
+    opt.tinyVram = TinyVram();
     opt.user = &counts;
     opt.onChange = [](const char* tag, const char* attr, const char* from, const char* to,
                       bool kept, void* user) {
@@ -1009,6 +1056,11 @@ bool LowVram() {
     return g.vendor != gpu::VendorUnknown && gpu::LowVram(g);
 }
 
+bool TinyVram() {
+    const gpu::Info& g = Gpu();
+    return g.vendor != gpu::VendorUnknown && gpu::TinyVram(g);
+}
+
 bool RestoreStockSettings(const char* why) {
     wchar_t docs[MAX_PATH] = {0};
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_PERSONAL, nullptr, 0, docs))) return false;
@@ -1039,10 +1091,27 @@ bool RestoreStockSettings(const char* why) {
 
 // --- crash safe mode --------------------------------------------------------
 namespace {
-testing::SafeState g_safe = {0, 0, 0};
+testing::SafeState g_safe = {0, 0, 0, 0};
 volatile long      g_safe_pending = 0;
+bool               g_safe_active = false;
+bool               g_safe_fallback = false;  // 0.3.6: state in %LOCALAPPDATA% instead
+
+// 0.3.6: when the game folder can't be written (Program Files without rights, a
+// read-only library), the state goes to %LOCALAPPDATA%\F1 25 RE-Optimization.
+bool FallbackPath(wchar_t* path) {
+    wchar_t base[MAX_PATH] = {0};
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, base))) return false;
+    wchar_t dir[MAX_PATH];
+    _snwprintf(dir, MAX_PATH, L"%s\\F1 25 RE-Optimization", base);
+    dir[MAX_PATH - 1] = 0;
+    CreateDirectoryW(dir, nullptr);
+    _snwprintf(path, MAX_PATH, L"%s\\f125_launch_state.txt", dir);
+    path[MAX_PATH - 1] = 0;
+    return true;
+}
 
 bool SafePath(wchar_t* path) {
+    if (g_safe_fallback) return FallbackPath(path);
     if (!g_exe_dir[0]) return false;
     _snwprintf(path, MAX_PATH, L"%s\\f125_launch_state.txt", g_exe_dir);
     path[MAX_PATH - 1] = 0;
@@ -1066,14 +1135,40 @@ bool CrashGuardStart() {
     wchar_t path[MAX_PATH];
     if (!SafePath(path)) return false;
     char text[128] = {0};
-    testing::SafeState prev = {0, 0, 0};
-    if (ReadFileAll(path, text, sizeof(text))) testing::SafeParse(text, F125_MOD_VERSION, &prev);
+    testing::SafeState prev = {0, 0, 0, 0};
+    bool have = ReadFileAll(path, text, sizeof(text)) != 0;
+    if (!have) {
+        // A state left in the fallback folder by an earlier launch.
+        wchar_t fb[MAX_PATH];
+        if (FallbackPath(fb) && ReadFileAll(fb, text, sizeof(text))) {
+            have = true;
+            g_safe_fallback = true;
+        }
+    }
+    if (have) testing::SafeParse(text, F125_MOD_VERSION, &prev);
+    if (const char* last = testing::SafeLastLaunch(prev)) {
+        char line[300];
+        _snprintf(line, sizeof(line), "crash safe mode: %s", last);
+        line[sizeof(line) - 1] = 0;
+        Note(line);
+    }
     const char* why = nullptr;
     const bool safe = testing::SafeStart(prev, &g_safe, &why);
     if (!SafeWrite(g_safe)) {
-        Note("crash safe mode: could not write f125_launch_state.txt - off for this launch");
-        return false;
+        if (!g_safe_fallback) {
+            g_safe_fallback = true;
+            if (!SafeWrite(g_safe)) g_safe_fallback = false;
+        }
+        if (!g_safe_fallback) {
+            Note("crash safe mode: could not write f125_launch_state.txt in the game folder or in "
+                 "%LOCALAPPDATA%\\F1 25 RE-Optimization - off for this launch");
+            return false;
+        }
     }
+    if (g_safe_fallback)
+        Note("crash safe mode: the game folder is not writable, so the launch state is kept in "
+             "%LOCALAPPDATA%\\F1 25 RE-Optimization");
+    g_safe_active = true;
     InterlockedExchange(&g_safe_pending, 1);
     if (why) {
         char line[300];
@@ -1082,6 +1177,13 @@ bool CrashGuardStart() {
         Note(line);
     }
     return safe;
+}
+
+void MarkCleanExit() {
+    if (!g_safe_active) return;
+    ConfirmLaunch(nullptr);
+    g_safe.end = 2;
+    SafeWrite(g_safe);
 }
 
 void ConfirmLaunch(const char* how) {
@@ -1106,7 +1208,7 @@ bool SafeStart(const SafeState& prev, SafeState* write, const char** why) {
     if (prev.kind == 1) {
         const int fails = prev.fails + 1;
         const int hold = fails >= 2 ? 3 : 1;
-        *write = {2, fails, hold - 1};
+        *write = {2, fails, hold - 1, 0};
         *why = fails >= 2
                    ? "the last two launches with the mod on never reached a stable menu; running "
                      "stock for 3 launches, then the mod is tried again"
@@ -1115,42 +1217,55 @@ bool SafeStart(const SafeState& prev, SafeState* write, const char** why) {
         return true;
     }
     if (prev.kind == 2) {
-        *write = {1, 0, 0};
+        *write = {1, 0, 0, 0};
         *why = "the last launch crashed with the mod OFF too, so the crash is likely not this mod "
                "(check other mods, drivers or the game); the "
                "mod is on again";
         return false;
     }
     if (prev.hold > 0) {
-        *write = {2, prev.fails, prev.hold - 1};
+        *write = {2, prev.fails, prev.hold - 1, 0};
         *why = "still running stock after repeated crashes with the mod on";
         return true;
     }
-    *write = {1, prev.fails, 0};
+    *write = {1, prev.fails, 0, 0};
     return false;
 }
 
 SafeState SafeConfirm(const SafeState& cur) {
-    if (cur.kind == 1) return {0, 0, 0};
-    return {0, cur.fails, cur.hold};
+    if (cur.kind == 1) return {0, 0, 0, 1};
+    return {0, cur.fails, cur.hold, 1};
+}
+
+const char* SafeLastLaunch(const SafeState& prev) {
+    if (prev.kind == 1)
+        return "the last launch never got past 90 s (crash or forced quit early on)";
+    if (prev.kind == 2) return "the last launch ran stock (crash safe mode) and did not finish cleanly";
+    if (prev.end == 2) return "the last launch quit cleanly";
+    if (prev.end == 1)
+        return "the last launch passed the 90 s check but did not quit cleanly (a crash after 90 s or a "
+               "forced quit); crash safe mode only acts on crashes in the first 90 s";
+    return nullptr;
 }
 
 bool SafeParse(const char* text, const char* version, SafeState* out) {
-    *out = {0, 0, 0};
+    *out = {0, 0, 0, 0};
     char kind[16] = {0}, ver[48] = {0};
-    int fails = 0, hold = 0;
-    if (sscanf(text, "%15s %d %d %47s", kind, &fails, &hold, ver) != 4) return false;
+    int fails = 0, hold = 0, end = 0;
+    const int got = sscanf(text, "%15s %d %d %47s %d", kind, &fails, &hold, ver, &end);
+    if (got < 4) return false;
     if (strcmp(ver, version) != 0 || fails < 0 || fails > 99 || hold < 0 || hold > 9) return false;
-    if (!strcmp(kind, "pending")) *out = {1, fails, hold};
-    else if (!strcmp(kind, "safe")) *out = {2, fails, hold};
-    else if (!strcmp(kind, "ok")) *out = {0, fails, hold};
+    if (got < 5 || end < 0 || end > 2) end = 0;
+    if (!strcmp(kind, "pending")) *out = {1, fails, hold, end};
+    else if (!strcmp(kind, "safe")) *out = {2, fails, hold, end};
+    else if (!strcmp(kind, "ok")) *out = {0, fails, hold, end};
     else return false;
     return true;
 }
 
 void SafeFormat(const SafeState& s, const char* version, char* out, size_t cap) {
     const char* k = s.kind == 1 ? "pending" : s.kind == 2 ? "safe" : "ok";
-    _snprintf(out, cap, "%s %d %d %s\r\n", k, s.fails, s.hold, version);
+    _snprintf(out, cap, "%s %d %d %s %d\r\n", k, s.fails, s.hold, version, s.end);
     out[cap - 1] = 0;
 }
 }  // namespace testing

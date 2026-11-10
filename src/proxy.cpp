@@ -368,6 +368,7 @@ BOOL WINAPI DllMain(HMODULE hMod, DWORD reason, LPVOID) {
     } else if (reason == DLL_PROCESS_DETACH) {
         // ExitProcess (a normal quit) runs this; a crash does not.
         tune::ConfirmLaunch(nullptr);
+        tune::MarkCleanExit();
     }
     return TRUE;
 }

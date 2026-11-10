@@ -5,6 +5,38 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.3.6] - 2026-11-10
+
+From 46 sessions of 0.3.5 logs (22 players). No crash stack contained the mod.
+
+### Fixed
+
+- **Crash safe mode works when the game folder can't be written.** It used to
+  switch itself off for that launch; the launch state now goes to
+  `%LOCALAPPDATA%\F1 25 RE-Optimization` instead.
+- **Crash safe mode explains itself.** Each launch logs how the last one ended:
+  quit cleanly, passed the 90 s check but did not quit cleanly (a crash after
+  90 s, which crash safe mode does not act on), or never got past 90 s.
+- **Recommended no longer steps a mid-range GPU down to Potato at 1440p on a weak
+  CPU.** On an older or 4-thread CPU the CPU is the limit, so Potato only made
+  the game look worse (an RTX 4060 with a 4th-gen Intel CPU stayed at ~30 fps).
+
+### Added
+
+- **Weak-CPU guard.** On a CPU with 4 threads or fewer, an Intel Core of the 7th
+  generation or older, or an older AMD FX / Phenom / Athlon / A-series, every
+  preset also gets the cuts that save CPU time: crowd distance and billboards,
+  particle rate and distance, lower-detail trees, ground cover distance, night
+  shadow casters. Never above your own settings.
+- **4 GB texture guard.** A discrete card with 4 GB or less streams textures at
+  Potato's level on every preset (4 GB cards had 1-2 second hitches).
+- **Log lines:** CPU name, cores and threads; GPU driver version; laptop power
+  (on battery, battery saver) with a note when it costs fps; Wine / Proton.
+
+### Changed
+
+- Version `0.3.6` in the DLL, installer output and docs.
+
 ## [0.3.5] - 2026-11-08
 
 From the first 0.3.4 logs.

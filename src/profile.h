@@ -44,6 +44,11 @@ struct Options {
     bool     allowRaise = false;
     // 6 GB or less, or integrated: memory-heavy settings never raise, even in target.
     bool     lowVram = false;
+    // 0.3.6: a weak CPU also gets the cuts that save CPU time (crowd, particles,
+    // trees, ground cover, night shadow casters) on any preset; lower only.
+    bool     weakCpu = false;
+    // 0.3.6: a 4 GB card streams textures at Potato's level on any preset.
+    bool     tinyVram = false;
     ChangeFn onChange = nullptr;
     void*    user = nullptr;
 };
@@ -90,6 +95,6 @@ struct Entry {
     const char* attr;
     const char* val;
 };
-int Entries(Preset p, Entry* out, int cap);
+int Entries(Preset p, Entry* out, int cap, bool weakCpu = false, bool tinyVram = false);
 
 }  // namespace profile

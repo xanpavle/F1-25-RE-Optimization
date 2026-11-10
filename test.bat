@@ -12,10 +12,10 @@ if not exist "%OUT%" mkdir "%OUT%"
 
 echo == building tests ==
 "%GCC%" -O2 -I "%SRC%" -o "%OUT%\hooktest.exe" "%TST%\hooktest.cpp" "%SRC%\hook.cpp" -static -static-libgcc || goto :fail
-"%GCC%" -O2 -I "%SRC%" -o "%OUT%\tunetest.exe" "%TST%\tunetest.cpp" "%SRC%\tune.cpp" "%SRC%\profile.cpp" "%SRC%\gpu.cpp" -static -static-libgcc -luser32 -lshell32 -ladvapi32 || goto :fail
-"%GCC%" -O2 -I "%SRC%" -o "%OUT%\enforcetest.exe" "%TST%\enforcetest.cpp" "%SRC%\enforce.cpp" "%SRC%\hook.cpp" "%SRC%\scan.cpp" "%SRC%\tune.cpp" "%SRC%\profile.cpp" "%SRC%\gpu.cpp" -static -static-libgcc -luser32 -lshell32 -ladvapi32 || goto :fail
+"%GCC%" -O2 -I "%SRC%" -o "%OUT%\tunetest.exe" "%TST%\tunetest.cpp" "%SRC%\tune.cpp" "%SRC%\profile.cpp" "%SRC%\gpu.cpp" "%SRC%\sys.cpp" -static -static-libgcc -luser32 -lshell32 -ladvapi32 || goto :fail
+"%GCC%" -O2 -I "%SRC%" -o "%OUT%\enforcetest.exe" "%TST%\enforcetest.cpp" "%SRC%\enforce.cpp" "%SRC%\hook.cpp" "%SRC%\scan.cpp" "%SRC%\tune.cpp" "%SRC%\profile.cpp" "%SRC%\gpu.cpp" "%SRC%\sys.cpp" -static -static-libgcc -luser32 -lshell32 -ladvapi32 || goto :fail
 "%GCC%" -O2 -I "%SRC%" -o "%OUT%\profiletest.exe" "%TST%\profiletest.cpp" "%SRC%\profile.cpp" -static -static-libgcc || goto :fail
-"%GCC%" -O2 -I "%SRC%" -o "%OUT%\gputest.exe" "%TST%\gputest.cpp" "%SRC%\gpu.cpp" "%SRC%\profile.cpp" -static -static-libgcc -luser32 -ladvapi32 || goto :fail
+"%GCC%" -O2 -I "%SRC%" -o "%OUT%\gputest.exe" "%TST%\gputest.cpp" "%SRC%\gpu.cpp" "%SRC%\profile.cpp" "%SRC%\sys.cpp" -static -static-libgcc -luser32 -ladvapi32 || goto :fail
 "%GCC%" -O2 -I "%SRC%" -o "%OUT%\scantest.exe" "%TST%\scantest.cpp" "%SRC%\scan.cpp" -static -static-libgcc -luser32 || goto :fail
 "%GCC%" -O2 -I "%SRC%" -o "%OUT%\presettest.exe" "%TST%\presettest.cpp" "%SRC%\profile.cpp" -static -static-libgcc || goto :fail
 
