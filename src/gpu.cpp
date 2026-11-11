@@ -290,6 +290,23 @@ Info Pick(const Info* c, int n) {
     return best;
 }
 
+bool Fsr3Risky(const Info& g, const char** why) {
+    const char* r = nullptr;
+    if (g.vendor == VendorAmd && !g.integrated) {
+        if (g.series < 5000) {
+            r = "AMD card from before RDNA (RX 400 / 500, Vega)";
+        } else {
+            int year = 0, month = 0, patch = 0, dots = 0;
+            for (const char* c = g.driver; *c; ++c) dots += *c == '.';
+            if (dots == 2 && sscanf(g.driver, "%d.%d.%d", &year, &month, &patch) == 3 && year >= 15 &&
+                year <= 40 && year < 24)
+                r = "AMD driver older than 24.1";
+        }
+    }
+    if (why) *why = r;
+    return r != nullptr;
+}
+
 const char* VendorName(Vendor v) {
     switch (v) {
         case VendorNvidia: return "NVIDIA";

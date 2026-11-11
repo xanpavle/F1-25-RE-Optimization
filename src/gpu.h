@@ -64,4 +64,9 @@ profile::Preset RecommendAt(const Info& g, int width, int height, bool weakCpu =
 
 const char* VendorName(Vendor v);
 
+// 0.3.8: switching to FSR 3 is a risk here: an AMD card from before RDNA (RX 400 /
+// 500, Vega, R9) or an AMD driver older than 24.1 ("pipeline state doesn't exist" on
+// an RX 570 with driver 23.11.1). Upscaler auto then keeps the player's choice.
+bool Fsr3Risky(const Info& g, const char** why = nullptr);
+
 }  // namespace gpu

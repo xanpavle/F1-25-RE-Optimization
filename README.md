@@ -4,7 +4,7 @@ A runtime renderer optimisation for **F1 25** (EGO engine, Codemasters / EA), bu
 by reverse-engineering the shipped executable. It makes the renderer do **less work
 for the same look** — no `F1_25.exe` bytes are patched on disk.
 
-**v0.3.7** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
+**v0.3.8** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
 
 Built and tested on a single machine, offline, single-player.
 
@@ -68,6 +68,14 @@ raster/RT delta adds the rest. Numbers are from a single machine and will vary.
 > with `benchmark\Benchmark_*.xml` on your own machine.
 
 ---
+
+## What changed in v0.3.8
+
+- **Older AMD cards keep their upscaler.** Upscaler auto no longer switches AMD
+  cards from before RDNA (RX 400 / 500, Vega) or AMD drivers older than 24.1 to
+  FSR 3, after a "pipeline state doesn't exist" report on an RX 570.
+- **No more files in `%LOCALAPPDATA%`.** Everything the mod keeps stays next to
+  the game.
 
 ## What changed in v0.3.7
 
@@ -681,4 +689,4 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
 MIT — see [LICENSE](LICENSE). Provided "as is", without warranty; see the disclaimer
 above.
 
-Version **0.3.7** - changes in [CHANGELOG.md](CHANGELOG.md).
+Version **0.3.8** - changes in [CHANGELOG.md](CHANGELOG.md).

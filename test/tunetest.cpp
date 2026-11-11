@@ -35,7 +35,7 @@ int main(void) {
     // GPU -> upscaler mapping (auto and forced modes).
     gpu::Info nv{};       nv.vendor = gpu::VendorNvidia; nv.supportsDlss = true;
     gpu::Info gtx{};      gtx.vendor = gpu::VendorNvidia; gtx.supportsDlss = false;
-    gpu::Info amd{};      amd.vendor = gpu::VendorAmd;
+    gpu::Info amd{};      amd.vendor = gpu::VendorAmd; amd.series = 7000;  // RDNA (0.3.8: pre-RDNA keeps the upscaler)
     gpu::Info arc{};      arc.vendor = gpu::VendorIntel; arc.supportsXess = true;
     gpu::Info igpu{};     igpu.vendor = gpu::VendorIntel; igpu.supportsXess = false;
     igpu.integrated = true;

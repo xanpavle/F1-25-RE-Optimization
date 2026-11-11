@@ -5,6 +5,25 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.3.8] - 2026-11-11
+
+### Fixed
+
+- **Upscaler auto no longer switches older AMD cards to FSR 3.** A "pipeline
+  state doesn't exist" abort was reported on an RX 570 (4 GB, driver 23.11.1)
+  after auto switched it to FSR 3. It isn't proven to be the mod (an imported
+  car mod was added the same day), but auto now keeps your own upscaler on AMD
+  cards from before RDNA (RX 400 / 500, Vega) and on AMD drivers older than
+  24.1, and the log says so. Choosing FSR 3 yourself still works.
+- **Nothing is written to `%LOCALAPPDATA%` any more.** The 0.3.6 fallback for a
+  read-only game folder is gone: crash safe mode is off for a launch where its
+  state file can't be written, and the VRAM guard memory stays next to the game
+  (or in the addon folder).
+
+### Changed
+
+- Version `0.3.8` in the DLL, installer output and docs.
+
 ## [0.3.7] - 2026-11-11
 
 From the first 0.3.6 logs (14 reports). No crash stack contained the mod.

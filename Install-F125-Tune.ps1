@@ -210,7 +210,7 @@ switch ($Action) {
         Write-Host 'Next:'
         Write-Host '  1) Launch F1 25 offline (single-player).'
         Write-Host "  2) Open $game\f125_tune.log - it should contain"
-        Write-Host '       [mod] F1 25 RE-Optimization v0.3.7'
+        Write-Host '       [mod] F1 25 RE-Optimization v0.3.8'
         Write-Host '       [mod] header: GPU ... | VRAM ...'
         Write-Host '       [mod] preset: ...'
         Write-Host '       [mod] hooks installed OK'

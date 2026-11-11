@@ -106,10 +106,27 @@ static void Test037() {
     Check(!strcmp(EntryVal(e, n, "ssao", "algorithm"), "1"), "guard: GPU-time effects stay balanced");
 }
 
+// 0.3.8: old AMD cards and drivers keep the player's upscaler.
+static void Test038() {
+    gpu::Info rx570 = gpu::Classify(gpu::VendorAmd, L"Radeon RX 570 Series");
+    strcpy(rx570.driver, "23.11.1");
+    Check(gpu::Fsr3Risky(rx570), "RX 570 + 23.11.1: FSR 3 risky");
+    gpu::Info r6700 = gpu::Classify(gpu::VendorAmd, L"AMD Radeon RX 6700 XT");
+    strcpy(r6700.driver, "23.11.1");
+    Check(gpu::Fsr3Risky(r6700), "RX 6700 XT + 23.11.1: risky (old driver)");
+    strcpy(r6700.driver, "24.10.1");
+    Check(!gpu::Fsr3Risky(r6700), "RX 6700 XT + 24.10.1: fine");
+    strcpy(r6700.driver, "31.0.24027.1012");
+    Check(!gpu::Fsr3Risky(r6700), "raw driver version: no guess");
+    gpu::Info nv = gpu::Classify(gpu::VendorNvidia, L"NVIDIA GeForce GTX 1650");
+    Check(!gpu::Fsr3Risky(nv), "NVIDIA: never");
+}
+
 int main(void) {
     Test035();
     Test036();
     Test037();
+    Test038();
     char seen[512];
     const gpu::Info g = gpu::Detect(seen, sizeof(seen));
     printf("found  : %s\n", seen);

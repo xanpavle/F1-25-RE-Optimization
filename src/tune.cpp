@@ -497,6 +497,8 @@ profile::Upscaler ChooseUpscalerFor(const gpu::Info& g, const char* mode) {
     // 0.3.2: on integrated graphics an upscaler pass costs a large share of the
     // frame, so auto leaves the player's in-game choice alone.
     if (g.integrated) return profile::Upscaler::Keep;
+    // 0.3.8: old AMD cards and drivers keep the player's upscaler (FSR 3 risk).
+    if (gpu::Fsr3Risky(g)) return profile::Upscaler::Keep;
     switch (g.vendor) {
         case gpu::VendorNvidia:
             return g.supportsDlss ? profile::Upscaler::Dlss : profile::Upscaler::Fsr3;
@@ -536,20 +538,10 @@ void SessionInfo() {
 
 }  // namespace
 
-// 0.3.7: f125_vram.txt next to F1_25.exe, or in %LOCALAPPDATA%\F1 25 RE-Optimization.
-bool VramPath(wchar_t* path, bool local) {
-    if (!local) {
-        if (!g_exe_dir[0]) return false;
-        _snwprintf(path, MAX_PATH, L"%s\\f125_vram.txt", g_exe_dir);
-    } else {
-        wchar_t base[MAX_PATH] = {0};
-        if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, base))) return false;
-        wchar_t dir[MAX_PATH];
-        _snwprintf(dir, MAX_PATH, L"%s\\F1 25 RE-Optimization", base);
-        dir[MAX_PATH - 1] = 0;
-        CreateDirectoryW(dir, nullptr);
-        _snwprintf(path, MAX_PATH, L"%s\\f125_vram.txt", dir);
-    }
+// 0.3.7: f125_vram.txt next to F1_25.exe (0.3.8: nothing is written anywhere else).
+bool VramPath(wchar_t* path) {
+    if (!g_exe_dir[0]) return false;
+    _snwprintf(path, MAX_PATH, L"%s\\f125_vram.txt", g_exe_dir);
     path[MAX_PATH - 1] = 0;
     return true;
 }
@@ -597,8 +589,7 @@ void Init() {
         wchar_t vp[MAX_PATH];
         char vt[64] = {0};
         bool got = false;
-        if (VramPath(vp, false)) got = ReadFileAll(vp, vt, sizeof(vt)) != 0;
-        if (!got && VramPath(vp, true)) got = ReadFileAll(vp, vt, sizeof(vt)) != 0;
+        if (VramPath(vp)) got = ReadFileAll(vp, vt, sizeof(vt)) != 0;
         if (got) g_vram_mem = sys::VramParse(vt);
         g_vram_tight = g_gpu.vendor != gpu::VendorUnknown && sys::VramTight(g_vram_mem, g_gpu.vramMb);
     }
@@ -976,6 +967,18 @@ bool ApplyProfile() {
     if (up == profile::Upscaler::Dlss && !g.supportsDlss) {
         Note("WARN: DLSS forced on a GPU without DLSS - the game may fall back");
     }
+    {
+        const char* risk = nullptr;
+        if (want == profile::Upscaler::Keep && gpu::Fsr3Risky(g, &risk)) {
+            char note[260];
+            _snprintf(note, sizeof(note),
+                      "note: %s, so upscaler auto leaves your in-game choice alone (switching to FSR 3 there "
+                      "can end in a \"pipeline state doesn't exist\" error)",
+                      risk);
+            note[sizeof(note) - 1] = 0;
+            Note(note);
+        }
+    }
     if (up == profile::Upscaler::Keep && g.vendor == gpu::VendorUnknown) {
         Note("upscaler: unknown GPU - leaving your in-game upscaler unchanged");
     }
@@ -1109,8 +1112,7 @@ void VramCheck(const char* when) {
     char text[48];
     sys::VramFormat(g_vram_mem, text, sizeof(text));
     wchar_t vp[MAX_PATH];
-    if (!(VramPath(vp, false) && WriteFileAtomic(vp, text, strlen(text))) && VramPath(vp, true))
-        WriteFileAtomic(vp, text, strlen(text));
+    if (VramPath(vp)) WriteFileAtomic(vp, text, strlen(text));
     if (pct >= 100 && !g_vram_tight)
         Note("note: the game is over its video memory budget, so Windows moves textures to system RAM and frames "
              "hitch; the VRAM guard turns on from the next launch (textures, shadow maps, fog and car reflections "
@@ -1162,24 +1164,8 @@ namespace {
 testing::SafeState g_safe = {0, 0, 0, 0};
 volatile long      g_safe_pending = 0;
 bool               g_safe_active = false;
-bool               g_safe_fallback = false;  // 0.3.6: state in %LOCALAPPDATA% instead
-
-// 0.3.6: when the game folder can't be written (Program Files without rights, a
-// read-only library), the state goes to %LOCALAPPDATA%\F1 25 RE-Optimization.
-bool FallbackPath(wchar_t* path) {
-    wchar_t base[MAX_PATH] = {0};
-    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, base))) return false;
-    wchar_t dir[MAX_PATH];
-    _snwprintf(dir, MAX_PATH, L"%s\\F1 25 RE-Optimization", base);
-    dir[MAX_PATH - 1] = 0;
-    CreateDirectoryW(dir, nullptr);
-    _snwprintf(path, MAX_PATH, L"%s\\f125_launch_state.txt", dir);
-    path[MAX_PATH - 1] = 0;
-    return true;
-}
 
 bool SafePath(wchar_t* path) {
-    if (g_safe_fallback) return FallbackPath(path);
     if (!g_exe_dir[0]) return false;
     _snwprintf(path, MAX_PATH, L"%s\\f125_launch_state.txt", g_exe_dir);
     path[MAX_PATH - 1] = 0;
@@ -1204,15 +1190,7 @@ bool CrashGuardStart() {
     if (!SafePath(path)) return false;
     char text[128] = {0};
     testing::SafeState prev = {0, 0, 0, 0};
-    bool have = ReadFileAll(path, text, sizeof(text)) != 0;
-    if (!have) {
-        // A state left in the fallback folder by an earlier launch.
-        wchar_t fb[MAX_PATH];
-        if (FallbackPath(fb) && ReadFileAll(fb, text, sizeof(text))) {
-            have = true;
-            g_safe_fallback = true;
-        }
-    }
+    const bool have = ReadFileAll(path, text, sizeof(text)) != 0;
     if (have) testing::SafeParse(text, F125_MOD_VERSION, &prev);
     if (const char* last = testing::SafeLastLaunch(prev)) {
         char line[300];
@@ -1223,19 +1201,9 @@ bool CrashGuardStart() {
     const char* why = nullptr;
     const bool safe = testing::SafeStart(prev, &g_safe, &why);
     if (!SafeWrite(g_safe)) {
-        if (!g_safe_fallback) {
-            g_safe_fallback = true;
-            if (!SafeWrite(g_safe)) g_safe_fallback = false;
-        }
-        if (!g_safe_fallback) {
-            Note("crash safe mode: could not write f125_launch_state.txt in the game folder or in "
-                 "%LOCALAPPDATA%\\F1 25 RE-Optimization - off for this launch");
-            return false;
-        }
+        Note("crash safe mode: could not write f125_launch_state.txt in the game folder - off for this launch");
+        return false;
     }
-    if (g_safe_fallback)
-        Note("crash safe mode: the game folder is not writable, so the launch state is kept in "
-             "%LOCALAPPDATA%\\F1 25 RE-Optimization");
     g_safe_active = true;
     InterlockedExchange(&g_safe_pending, 1);
     if (why) {
