@@ -1118,8 +1118,9 @@ void VramCheck(const char* when) {
              "hitch; the VRAM guard turns on from the next launch (textures, shadow maps, fog and car reflections "
              "at Potato's sizes)");
     else if (pct >= 100)
-        Note("note: still over the video memory budget with the VRAM guard on; lower Texture Quality in the "
-             "game's graphics menu");
+        Note("note: still over the video memory budget with the VRAM guard on, so the rest is textures the "
+             "mod's settings don't reach; lower Texture Quality in the game's graphics menu, or remove some "
+             "car, livery, helmet or track mods");
     else if (pct >= 90)
         Note("note: video memory is nearly full, so textures stream in late and frames can hitch");
     if (g_vram_tight && before && !sys::VramTight(g_vram_mem, g_gpu.vramMb))

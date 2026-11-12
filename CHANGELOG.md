@@ -5,6 +5,17 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.3.9] - 2026-11-12
+
+### Changed
+
+- **The VRAM note names the real cause.** In the 0.3.8 logs every card still
+  over its video memory budget with the VRAM guard on had 60-138 mods
+  installed, most of them cars, liveries, helmets and tracks. Their textures
+  are outside the mod's settings, so the note now says so.
+- Version `0.3.9` in the DLL, installer output and docs. The other 0.3.9
+  changes are in the Swofty Launcher addon, where the frame checks run.
+
 ## [0.3.8] - 2026-11-11
 
 ### Fixed
