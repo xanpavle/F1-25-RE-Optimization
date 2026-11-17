@@ -5,6 +5,24 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-11-17
+
+### Fixed
+
+- **Works with the November 2026 game update (F1_25.exe 1.0.145.2472).** The
+  update moved every engine address the mod uses (and renamed the exe's
+  sections). All of them were re-derived on the new exe and verified: each
+  settings site is a call into the right parser, found both at its new address
+  and again by name. Without this, three settings that appear at more than one
+  place in the new exe (volumetric fog height, god rays, ground cover) would
+  have been skipped.
+- The startup line names the new build as verified; the old build still works
+  through the signature scan.
+
+### Changed
+
+- Version `0.4.0` in the DLL, installer output and docs.
+
 ## [0.3.9] - 2026-11-12
 
 ### Changed

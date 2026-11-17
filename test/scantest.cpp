@@ -37,52 +37,52 @@ static const char* kSigScalarGet =
     "48 8D 71 10 48 89 F1 E8 ?? ?? ?? ??";
 
 static const uintptr_t kBase = 0x140000000u;
-static const uintptr_t kRvaParseInt = 0x534dcd8u;
-static const uintptr_t kRvaParseBool = 0x534d918u;
-static const uintptr_t kRvaParseFloatThunk = 0x5343ff4u;
-static const uintptr_t kRvaParseFloat = 0x5343ffcu;
-static const uintptr_t kRvaApply = 0x40217f0u;
-static const uintptr_t kRvaApplyNode = 0x40226c0u;
+static const uintptr_t kRvaParseInt = 0x5350698u;
+static const uintptr_t kRvaParseBool = 0x53502d8u;
+static const uintptr_t kRvaParseFloatThunk = 0x53469b4u;
+static const uintptr_t kRvaParseFloat = 0x53469bcu;
+static const uintptr_t kRvaApply = 0x4023dc0u;
+static const uintptr_t kRvaApplyNode = 0x4024c90u;
 
 struct IntEnf { uintptr_t ret_rva; const char* name; const char* key; };
 struct BoolEnf { uintptr_t call_rva; const char* name; const char* key; };
 struct FloatEnf { uintptr_t ret_rva; const char* name; const char* key; };
 
 static const IntEnf kInt[] = {
-    {0x3dc3c7b, "worldShadowMapSize", "worldShadowMapSize"},
-    {0x1271345b, "nightShadowMapSize", "nightShadowMapSize"},
-    {0x3dc3d5b, "spotShadowSampling", "spotShadowSampling"},
-    {0x3ca508d, "volumetricFogMapWidth", "volumetricFogMapWidth"},
-    {0x3ca519f, "volumetricFogMapHeight", "volumetricFogMapHeight"},
-    {0x3c6013b, "billboardDistance", "billboardDistance"},
-    {0x3dc3abb, "skyShadowMapSize", "skyShadowMapSize"},
-    {0x3dc3b9b, "skyShadowCascadeCount", "skyShadowCascadeCount"},
-    {0x3dc3ceb, "spotShadowMapSize", "spotShadowMapSize"},
-    {0x127134db, "nightShadowSourceCount", "nightShadowSourceCount"},
-    {0x127d0abd, "shadowSampling", "sampling"},
-    {0x71f855b, "textureStreamingMiB", "sizeInMiB"},
+    {0x3dc624b, "worldShadowMapSize", "worldShadowMapSize"},
+    {0x11f5a93b, "nightShadowMapSize", "nightShadowMapSize"},
+    {0x3dc632b, "spotShadowSampling", "spotShadowSampling"},
+    {0x3ca765d, "volumetricFogMapWidth", "volumetricFogMapWidth"},
+    {0x3ca776f, "volumetricFogMapHeight", "volumetricFogMapHeight"},
+    {0x3c6270b, "billboardDistance", "billboardDistance"},
+    {0x3dc608b, "skyShadowMapSize", "skyShadowMapSize"},
+    {0x3dc616b, "skyShadowCascadeCount", "skyShadowCascadeCount"},
+    {0x3dc62bb, "spotShadowMapSize", "spotShadowMapSize"},
+    {0x11f5a9ab, "nightShadowSourceCount", "nightShadowSourceCount"},
+    {0x11fe08cd, "shadowSampling", "sampling"},
+    {0x721211b, "textureStreamingMiB", "sizeInMiB"},
 };
 static const BoolEnf kBool[] = {
-    {0x3dc3c08, "skyShadowLowLod", "skyShadowLowLod"},
-    {0x3dc3b28, "skyShadowMap32Bits", "skyShadowMap32Bits"},
-    {0x874aa08, "crowdInShadows", "crowdInShadows"},
-    {0x2c8d638, "godRays", "godRays"},
-    {0x2f811a8, "godRays", "godRays"},
-    {0x2f81288, "lensStreak", "lensStreak"},
-    {0x2f813d8, "motionBlurV2", "motionBlurV2"},
-    {0x728dd18, "nightShadowCharacterCast", "nightShadowCharacterCast"},
+    {0x3dc61d8, "skyShadowLowLod", "skyShadowLowLod"},
+    {0x3dc60f8, "skyShadowMap32Bits", "skyShadowMap32Bits"},
+    {0x8565128, "crowdInShadows", "crowdInShadows"},
+    {0x2c8fbc8, "godRays", "godRays"},
+    {0x2f83738, "godRays", "godRays"},
+    {0x2f83818, "lensStreak", "lensStreak"},
+    {0x2f83968, "motionBlurV2", "motionBlurV2"},
+    {0x72d8628, "nightShadowCharacterCast", "nightShadowCharacterCast"},
     {0x15abec, "rainSplashes", "rainSplashes"},
     {0x15aadc, "rainBeads", "rainBeads"},
     {0x15acdc, "rainHigh", "rainHigh"},
     {0x15adcc, "trackHeatHaze", "trackHeatHaze"},
-    {0x1275b6ab, "rainSheets", "rainSheets"},
-    {0x3ce4288, "groundCover.enabled", "enabled"},
-    {0x3ce4308, "grassFlattening", "grassFlattening"},
-    {0x3ce438c, "groundCover.meshes", "meshes"},
-    {0x3ca4f38, "volumetricFog", "volumetricFog"},
+    {0x11f7c59a, "rainSheets", "rainSheets"},
+    {0x3ce6858, "groundCover.enabled", "enabled"},
+    {0x3ce68d8, "grassFlattening", "grassFlattening"},
+    {0x3ce695c, "groundCover.meshes", "meshes"},
+    {0x3ca7508, "volumetricFog", "volumetricFog"},
 };
 static const FloatEnf kFloat[] = {
-    {0x3ce448b, "groundCover.drawDistance", "drawDistance"},
+    {0x3ce6a5b, "groundCover.drawDistance", "drawDistance"},
     {0x15b2ef,  "proceduralCloudRTScale",   "proceduralCloudRTScale"},
 };
 
@@ -236,8 +236,8 @@ int main(int argc, char** argv) {
     }
     Chk(Unique(img, kSigApply, img.base + kRvaApply), "apply signature unique at known RVA");
     Chk(Unique(img, kSigApplyNode, img.base + kRvaApplyNode), "applyNode signature unique at known RVA");
-    Chk(Unique(img, kSigBoolGet, img.base + 0x3a43b90), "bool getter signature unique");
-    Chk(Unique(img, kSigScalarGet, img.base + 0x3a43240), "scalar getter signature unique");
+    Chk(Unique(img, kSigBoolGet, img.base + 0x3a46160), "bool getter signature unique");
+    Chk(Unique(img, kSigScalarGet, img.base + 0x3a45810), "scalar getter signature unique");
 
     int okInt = 0, discInt = 0, okBool = 0, discBool = 0, okFloat = 0, discFloat = 0;
     const int nIntTab = (int)(sizeof(kInt) / sizeof(*kInt));

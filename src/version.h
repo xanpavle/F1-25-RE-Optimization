@@ -2,4 +2,4 @@
 #pragma once
 
 #define F125_MOD_NAME    "F1 25 RE-Optimization"
-#define F125_MOD_VERSION "0.3.9"
+#define F125_MOD_VERSION "0.4.0"

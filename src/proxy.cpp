@@ -20,8 +20,8 @@
 // --- F1_25.exe (image base 0x140000000, no ASLR) -----------------------------
 // FUN_143a43b90: bool attribute getter  (node, name, uint8_t* out, uint8_t def)
 // FUN_143a43240: 32-bit attribute getter (node, name, uint32_t* out, uint32_t def)
-static const uintptr_t kRvaBoolGet   = 0x03a43b90u;
-static const uintptr_t kRvaScalarGet = 0x03a43240u;
+static const uintptr_t kRvaBoolGet   = 0x03a46160u;
+static const uintptr_t kRvaScalarGet = 0x03a45810u;
 
 // Signatures so the getters can be re-derived on an updated game build.
 static const char* kSigBoolGet =
@@ -118,10 +118,10 @@ static void InstallHooks() {
 
 // --- game build check -------------------------------------------------------
 // The hard-coded RVAs above and in enforce.cpp were taken from this build
-// (Steam 1.0.141.7865, SHA-256 d873a1c8...). Its PE header identifies it
+// (Steam 1.0.145.2472, SHA-256 46009bd3...). Its PE header identifies it
 // without hashing the 400 MB file.
-static const uint32_t kKnownTimestamp   = 0x6AA3C898u;
-static const uint32_t kKnownSizeOfImage = 0x193E6000u;
+static const uint32_t kKnownTimestamp   = 0x6AF309BCu;
+static const uint32_t kKnownSizeOfImage = 0x18434000u;
 
 static bool IsKnownBuild(uint32_t* ts, uint32_t* size) {
     const BYTE* base = (const BYTE*)GetModuleHandleW(nullptr);
@@ -299,7 +299,7 @@ static void Startup() {
     const bool known = IsKnownBuild(&ts, &size);
     char line[192];
     _snprintf(line, sizeof(line),
-              known ? "build: F1_25.exe 1.0.141.7865 verified (timestamp %08X, image %08X)"
+              known ? "build: F1_25.exe 1.0.145.2472 verified (timestamp %08X, image %08X)"
                     : "build: UNKNOWN F1_25.exe (timestamp %08X, image %08X) - "
                       "hard-coded addresses not trusted",
               ts, size);

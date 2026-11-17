@@ -14,10 +14,10 @@ namespace {
 
 // --- F1_25.exe (image base 0x140000000, no ASLR) -----------------------------
 // FUN_14534dcd8: int attribute-value parser (valueString, default, flags).
-static const uintptr_t kRvaParseInt  = 0x534dcd8u;
+static const uintptr_t kRvaParseInt  = 0x5350698u;
 // FUN_14534d918: bool attribute check; returns 0 when the string is "true"
 // (the callers turn that into a bool with `test eax,eax; sete`).
-static const uintptr_t kRvaParseBool = 0x534d918u;
+static const uintptr_t kRvaParseBool = 0x53502d8u;
 
 // FUN_145343ff4: two-argument thunk (`xor r8d,r8d; jmp`) into the real float
 // parser at FUN_145343ffc, which has the MSVC `_strtof_s` shape:
@@ -25,13 +25,13 @@ static const uintptr_t kRvaParseBool = 0x534d918u;
 // Every float attribute site does `lea rcx,[out]; mov rdx,valueString; call
 // thunk`, so call sites are validated against the *thunk* while the detour is
 // installed on the core entry (the thunk is a branch and cannot be relocated).
-static const uintptr_t kRvaParseFloatThunk = 0x5343ff4u;
-static const uintptr_t kRvaParseFloat      = 0x5343ffcu;
+static const uintptr_t kRvaParseFloatThunk = 0x53469b4u;
+static const uintptr_t kRvaParseFloat      = 0x53469bcu;
 
 // hardwareSettings::Options::apply / ::applyNode (verified via xrefs on the
 // "[hardwareSettings::Options::apply]" / "[...applyNode]" log strings).
-static const uintptr_t kRvaApply     = 0x40217f0u;
-static const uintptr_t kRvaApplyNode = 0x40226c0u;
+static const uintptr_t kRvaApply     = 0x4023dc0u;
+static const uintptr_t kRvaApplyNode = 0x4024c90u;
 
 // The live preset tree is the *settings* document, not the hardware-info one.
 //
@@ -125,21 +125,21 @@ struct Enf {
 };
 Enf g_enf[] = {
     // shadows: half the map pixels, cheaper spot filtering
-    {0x3dc3c7b,  2048, "worldShadowMapSize",      "worldShadowMapSize",     0, 0},
-    {0x1271345b, 2048, "nightShadowMapSize",      "nightShadowMapSize",     0, 0},
-    {0x3dc3d5b,  2,    "spotShadowSampling",      "spotShadowSampling",     0, 0},
+    {0x3dc624b,  2048, "worldShadowMapSize",      "worldShadowMapSize",     0, 0},
+    {0x11f5a93b, 2048, "nightShadowMapSize",      "nightShadowMapSize",     0, 0},
+    {0x3dc632b,  2,    "spotShadowSampling",      "spotShadowSampling",     0, 0},
     // volumetric fog: ~15x fewer fog pixels (fog is soft, invisible)
-    {0x3ca508d,  512,  "volumetricFogMapWidth",   "volumetricFogMapWidth",  0, 0},
-    {0x3ca519f,  288,  "volumetricFogMapHeight",  "volumetricFogMapHeight", 0, 0},
+    {0x3ca765d,  512,  "volumetricFogMapWidth",   "volumetricFogMapWidth",  0, 0},
+    {0x3ca776f,  288,  "volumetricFogMapHeight",  "volumetricFogMapHeight", 0, 0},
     // crowd billboards: shorter draw distance
-    {0x3c6013b,  2500, "billboardDistance",       "billboardDistance",      0, 0},
+    {0x3c6270b,  2500, "billboardDistance",       "billboardDistance",      0, 0},
     // Ultra-class values the preset clamp otherwise rewrites (no quality loss)
-    {0x3dc3abb,  2048, "skyShadowMapSize",        "skyShadowMapSize",       0, 0},
-    {0x3dc3b9b,  4,    "skyShadowCascadeCount",   "skyShadowCascadeCount",  0, 0},
-    {0x3dc3ceb,  2048, "spotShadowMapSize",       "spotShadowMapSize",      0, 0},
-    {0x127134db, 4,    "nightShadowSourceCount",  "nightShadowSourceCount", 0, 0},
-    {0x127d0abd, 2,    "shadowSampling",          "sampling",               0, 0},
-    {0x71f855b,   2048, "textureStreamingMiB",     "sizeInMiB",              0, 0},
+    {0x3dc608b,  2048, "skyShadowMapSize",        "skyShadowMapSize",       0, 0},
+    {0x3dc616b,  4,    "skyShadowCascadeCount",   "skyShadowCascadeCount",  0, 0},
+    {0x3dc62bb,  2048, "spotShadowMapSize",       "spotShadowMapSize",      0, 0},
+    {0x11f5a9ab, 4,    "nightShadowSourceCount",  "nightShadowSourceCount", 0, 0},
+    {0x11fe08cd, 2,    "shadowSampling",          "sampling",               0, 0},
+    {0x721211b,   2048, "textureStreamingMiB",     "sizeInMiB",              0, 0},
 };
 const int kEnfCount = (int)(sizeof(g_enf) / sizeof(g_enf[0]));
 
@@ -159,24 +159,24 @@ struct BoolEnf {
 };
 BoolEnf g_bool[] = {
     // --- tuned delta (matches src/profile.cpp; the file alone can be reverted) ---
-    {0x3dc3c08,  true,  "skyShadowLowLod",            "skyShadowLowLod",            0, 1},
-    {0x3dc3b28,  false, "skyShadowMap32Bits",         "skyShadowMap32Bits",         0},
-    {0x874aa08,  false, "crowdInShadows",             "crowdInShadows",             0},
-    {0x2c8d638,  false, "godRays",                    "godRays",                    0},
-    {0x2f811a8,  false, "godRays",                    "godRays",                    0},
-    {0x2f81288,  false, "lensStreak",                 "lensStreak",                 0},
-    {0x2f813d8,  false, "motionBlurV2",               "motionBlurV2",               0},
+    {0x3dc61d8,  true,  "skyShadowLowLod",            "skyShadowLowLod",            0, 1},
+    {0x3dc60f8,  false, "skyShadowMap32Bits",         "skyShadowMap32Bits",         0},
+    {0x8565128,  false, "crowdInShadows",             "crowdInShadows",             0},
+    {0x2c8fbc8,  false, "godRays",                    "godRays",                    0},
+    {0x2f83738,  false, "godRays",                    "godRays",                    0},
+    {0x2f83818,  false, "lensStreak",                 "lensStreak",                 0},
+    {0x2f83968,  false, "motionBlurV2",               "motionBlurV2",               0},
     // --- kept ON: weather, grass and night shadows are visible, not free ---
-    {0x728dd18,  true,  "nightShadowCharacterCast",   "nightShadowCharacterCast",   0},
+    {0x72d8628,  true,  "nightShadowCharacterCast",   "nightShadowCharacterCast",   0},
     {0x15abec,   true,  "rainSplashes",               "rainSplashes",               0},
     {0x15aadc,   true,  "rainBeads",                  "rainBeads",                  0},
     {0x15acdc,   true,  "rainHigh",                   "rainHigh",                   0},
     {0x15adcc,   true,  "trackHeatHaze",              "trackHeatHaze",              0},
-    {0x1275b6ab, true,  "rainSheets",                 "rainSheets",                 0},
-    {0x3ce4288,  true,  "groundCover.enabled",        "enabled",                    0},
-    {0x3ce4308,  true,  "grassFlattening",            "grassFlattening",            0},
-    {0x3ce438c,  true,  "groundCover.meshes",         "meshes",                     0},
-    {0x3ca4f38,  true,  "volumetricFog",              "volumetricFog",              0},
+    {0x11f7c59a, true,  "rainSheets",                 "rainSheets",                 0},
+    {0x3ce6858,  true,  "groundCover.enabled",        "enabled",                    0},
+    {0x3ce68d8,  true,  "grassFlattening",            "grassFlattening",            0},
+    {0x3ce695c,  true,  "groundCover.meshes",         "meshes",                     0},
+    {0x3ca7508,  true,  "volumetricFog",              "volumetricFog",              0},
 };
 const int kBoolCount = (int)(sizeof(g_bool) / sizeof(g_bool[0]));
 
@@ -193,7 +193,7 @@ struct FloatEnf {
 };
 FloatEnf g_float[] = {
     // far grass only (the ground-cover node is rewritten by the preset clamp)
-    {0x3ce448b, 80.0f, "groundCover.drawDistance", "drawDistance",       0, 0},
+    {0x3ce6a5b, 80.0f, "groundCover.drawDistance", "drawDistance",       0, 0},
     // ray-traced clouds: half the RT resolution (soft, barely visible)
     {0x15b2ef,  2.0f,  "proceduralCloudRTScale",   "proceduralCloudRTScale", 0, 0},
 };

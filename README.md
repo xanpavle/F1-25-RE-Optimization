@@ -4,7 +4,7 @@ A runtime renderer optimisation for **F1 25** (EGO engine, Codemasters / EA), bu
 by reverse-engineering the shipped executable. It makes the renderer do **less work
 for the same look** — no `F1_25.exe` bytes are patched on disk.
 
-**v0.3.9** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
+**v0.4.0** · [FAQ](docs/faq.md) · [Troubleshooting](docs/troubleshooting.md) · [Engineering notes](docs/engineering.md) · [Changelog](CHANGELOG.md)
 
 Built and tested on a single machine, offline, single-player.
 
@@ -68,6 +68,15 @@ raster/RT delta adds the rest. Numbers are from a single machine and will vary.
 > with `benchmark\Benchmark_*.xml` on your own machine.
 
 ---
+
+## What changed in v0.4.0
+
+- **Made for the November 2026 game update (1.0.145.2472).** Every engine
+  address the mod uses moved in that update. All of them were re-derived on the
+  new F1_25.exe and checked: 12 integer, 17 boolean and 2 float settings sites,
+  the three settings parsers, the two setting getters and the preset apply
+  functions. On the old 1.0.141 build the mod still finds what it needs by
+  signature, like after any update.
 
 ## What changed in v0.3.9
 
@@ -216,8 +225,8 @@ above are unchanged (they are the Balanced preset).
 A safety release. The look and the tuning are unchanged from 0.2.8.
 
 - **Game-update check.** At launch the mod reads the `F1_25.exe` header (timestamp
-  `6AA3C898`, image size `193E6000`) and logs whether it is the build it was made for,
-  **1.0.141.7865**. On any other build it trusts **no** hard-coded address: every hook is
+  `6AF309BC`, image size `18434000`) and logs whether it is the build it was made for,
+  **1.0.145.2472**. On any other build it trusts **no** hard-coded address: every hook is
   re-derived by signature, and any hook that does not verify is skipped and logged. If
   you would rather have the mod switch itself off after a game patch, set
   `unknown_build = off` in `[profile]`. The game then runs completely stock.
@@ -638,7 +647,7 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
   launch, so a game update usually keeps working. Anything that cannot be re-derived
   unambiguously is skipped and logged (`enforce: WARN … unresolved`), never guessed —
   and the mod still fails safe (no patching) if the parsers themselves are not found.
-- **After a game patch:** the log's first lines say `build: F1_25.exe 1.0.141.7865 verified`
+- **After a game patch:** the log's first lines say `build: F1_25.exe 1.0.145.2472 verified`
   or `build: UNKNOWN F1_25.exe ...`. On an unknown build the mod re-derives every
   address (`unknown_build = scan`, the default) or disables itself
   (`unknown_build = off`). It never patches code it could not verify.
@@ -695,4 +704,4 @@ f125_tune.ini        profile switch + upscaler + engine overrides + `[enforce]`
 MIT — see [LICENSE](LICENSE). Provided "as is", without warranty; see the disclaimer
 above.
 
-Version **0.3.9** - changes in [CHANGELOG.md](CHANGELOG.md).
+Version **0.4.0** - changes in [CHANGELOG.md](CHANGELOG.md).
